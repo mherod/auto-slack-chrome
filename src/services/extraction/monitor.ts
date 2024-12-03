@@ -11,8 +11,10 @@ export class MonitorService {
   private lastMessageTimestamp: number = Date.now();
   private reconnectInterval: number | null = null;
   private scrollTimeout: number | null = null;
+  private pollingInterval: number | null = null;
   private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
   private readonly SCROLL_DEBOUNCE_MS = 250;
+  private readonly POLLING_INTERVAL_MS = 2000; // Poll every 2 seconds
   private isExtracting = false;
 
   public constructor(
@@ -74,6 +76,9 @@ export class MonitorService {
     // Set up reconnect check
     this.setupReconnectCheck();
 
+    // Set up polling monitor
+    this.setupPollingMonitor();
+
     // Initial extraction
     await this.extractMessages();
 
@@ -101,6 +106,11 @@ export class MonitorService {
     if (this.scrollTimeout !== null) {
       window.clearTimeout(this.scrollTimeout);
       this.scrollTimeout = null;
+    }
+
+    if (this.pollingInterval !== null) {
+      window.clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
     }
 
     // Remove scroll listener
@@ -170,11 +180,22 @@ export class MonitorService {
         this.observer.disconnect();
       }
 
-      this.observer = new MutationObserver(() => {
+      this.observer = new MutationObserver((mutations) => {
         if (!this.isExtracting) {
-          void this.extractMessages();
-          this.onSync();
-          this.lastMessageTimestamp = Date.now();
+          // Check if any mutations are relevant to message content
+          const hasRelevantChanges = mutations.some(
+            (mutation) =>
+              mutation.type === 'childList' ||
+              (mutation.type === 'attributes' && mutation.attributeName === 'data-qa') ||
+              (mutation.type === 'attributes' &&
+                mutation.attributeName === 'data-needs-sender-update'),
+          );
+
+          if (hasRelevantChanges) {
+            void this.extractMessages();
+            this.onSync();
+            this.lastMessageTimestamp = Date.now();
+          }
         }
       });
 
@@ -182,7 +203,7 @@ export class MonitorService {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['data-qa'],
+        attributeFilter: ['data-qa', 'data-needs-sender-update'],
       });
     }
   }
@@ -369,5 +390,39 @@ export class MonitorService {
       currentChannel: this.currentChannelInfo,
       extractedMessages: this.extractedMessages,
     });
+  }
+
+  private setupPollingMonitor(): void {
+    // Clear existing interval if it exists
+    if (this.pollingInterval !== null) {
+      window.clearInterval(this.pollingInterval);
+    }
+
+    // Set up new polling interval
+    this.pollingInterval = window.setInterval(async () => {
+      if (!this.isExtracting) {
+        const container = this.messageExtractor.getMessageContainer();
+        if (container !== null) {
+          // Check if there are any unextracted messages
+          const unextractedMessages = container.querySelectorAll(
+            `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
+          );
+
+          if (unextractedMessages.length > 0) {
+            // Extract messages if we find any that haven't been processed
+            await this.extractMessages();
+            this.onSync();
+            this.lastMessageTimestamp = Date.now();
+          }
+
+          // Check for messages that might need sender updates
+          const needsSenderUpdate = container.querySelectorAll('[data-needs-sender-update]');
+          if (needsSenderUpdate.length > 0) {
+            await this.extractMessages();
+            this.onSync();
+          }
+        }
+      }
+    }, this.POLLING_INTERVAL_MS);
   }
 }
