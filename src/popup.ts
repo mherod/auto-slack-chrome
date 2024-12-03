@@ -14,6 +14,7 @@ interface PopupState {
   activeTabId: number | null;
   lastSync: number;
   state: ExtensionState | null;
+  syncIntervalId?: number;
 }
 
 interface StatusMessage {
@@ -35,6 +36,7 @@ interface ExtractionControlMessage {
 type PopupMessage = StatusMessage | StateUpdateMessage;
 
 const POPUP_SYNC_INTERVAL = 2500; // 2.5 seconds for popup since it's temporary
+const NOTIFICATION_DURATION = 3000; // 3 seconds default notification duration
 
 const popupState: PopupState = {
   isConnected: false,
@@ -43,33 +45,66 @@ const popupState: PopupState = {
   state: null,
 };
 
-// Update UI based on current state
-const updateUI = (): void => {
-  const statusElement = document.getElementById('status');
-  const channelInfoElement = document.getElementById('channelInfo');
-  const messageCountElement = document.getElementById('messageCount');
-  const messageStatsElement = document.getElementById('messageStats');
-  const startButton = document.getElementById('startButton') as HTMLButtonElement;
-  const stopButton = document.getElementById('stopButton') as HTMLButtonElement;
-  const downloadButton = document.getElementById('downloadButton') as HTMLButtonElement;
-  const goToSlackButton = document.getElementById('goToSlackButton') as HTMLButtonElement;
+interface UIElements {
+  status: HTMLElement;
+  channelInfo: HTMLElement;
+  messageCount: HTMLElement;
+  messageStats: HTMLElement | null;
+  startButton: HTMLButtonElement;
+  stopButton: HTMLButtonElement;
+  downloadButton: HTMLButtonElement;
+  goToSlackButton: HTMLButtonElement;
+}
 
-  if (statusElement === null || channelInfoElement === null || messageCountElement === null) {
-    return;
+const getUIElements = (): UIElements | null => {
+  const status = document.getElementById('status');
+  const channelInfo = document.getElementById('channelInfo');
+  const messageCount = document.getElementById('messageCount');
+
+  if (!status || !channelInfo || !messageCount) {
+    return null;
   }
 
+  return {
+    status,
+    channelInfo,
+    messageCount,
+    messageStats: document.getElementById('messageStats'),
+    startButton: document.getElementById('startButton') as HTMLButtonElement,
+    stopButton: document.getElementById('stopButton') as HTMLButtonElement,
+    downloadButton: document.getElementById('downloadButton') as HTMLButtonElement,
+    goToSlackButton: document.getElementById('goToSlackButton') as HTMLButtonElement,
+  };
+};
+
+// Update UI based on current state
+const updateUI = (): void => {
+  const elements = getUIElements();
+  if (!elements) return;
+
+  const {
+    status,
+    channelInfo,
+    messageCount,
+    messageStats,
+    startButton,
+    stopButton,
+    downloadButton,
+    goToSlackButton,
+  } = elements;
+
   if (!popupState.isConnected) {
-    statusElement.textContent = 'Not connected to Slack';
+    status.textContent = 'Not connected to Slack';
     startButton.disabled = true;
     stopButton.disabled = true;
     downloadButton.disabled = true;
     goToSlackButton.style.display = 'block';
     startButton.style.display = 'none';
     stopButton.style.display = 'none';
-    channelInfoElement.textContent = '';
-    messageCountElement.textContent = '';
-    if (messageStatsElement) {
-      messageStatsElement.innerHTML = '';
+    channelInfo.textContent = '';
+    messageCount.textContent = '';
+    if (messageStats) {
+      messageStats.innerHTML = '';
     }
     return;
   }
@@ -80,28 +115,28 @@ const updateUI = (): void => {
   stopButton.style.display = 'block';
 
   if (popupState.state === null) {
-    statusElement.textContent = 'Connected to Slack';
+    status.textContent = 'Connected to Slack';
     startButton.disabled = false;
     stopButton.disabled = true;
     downloadButton.disabled = true;
-    channelInfoElement.textContent = '';
-    messageCountElement.textContent = '';
-    if (messageStatsElement) {
-      messageStatsElement.innerHTML = '';
+    channelInfo.textContent = '';
+    messageCount.textContent = '';
+    if (messageStats) {
+      messageStats.innerHTML = '';
     }
     return;
   }
 
   // Update status
-  statusElement.textContent = popupState.state.isExtracting
+  status.textContent = popupState.state.isExtracting
     ? 'Extracting messages...'
     : 'Connected to Slack';
 
   // Update channel info
-  channelInfoElement.textContent =
-    popupState.state.currentChannel !== null
-      ? `Current channel: ${popupState.state.currentChannel.channel} (${popupState.state.currentChannel.organization})`
-      : 'No channel selected';
+  const { currentChannel } = popupState.state;
+  channelInfo.textContent = currentChannel
+    ? `Current channel: ${currentChannel.channel} (${currentChannel.organization})`
+    : 'No channel selected';
 
   // Update buttons
   startButton.disabled = popupState.state.isExtracting;
@@ -109,13 +144,13 @@ const updateUI = (): void => {
   downloadButton.disabled = false;
 
   // Update message stats
-  if (messageStatsElement !== null) {
-    updateMessageStats(messageStatsElement, popupState.state.extractedMessages);
+  if (messageStats) {
+    updateMessageStats(messageStats, popupState.state.extractedMessages);
   }
 
   // Update total message count
   const totalMessages = calculateTotalMessages(popupState.state.extractedMessages);
-  messageCountElement.textContent = `Total messages: ${totalMessages}`;
+  messageCount.textContent = `Total messages: ${totalMessages}`;
 };
 
 interface ChannelStats {
@@ -153,6 +188,102 @@ const calculateMessageStats = (
     .sort((a, b) => b.messageCount - a.messageCount);
 };
 
+const createChannelRow = (channel: ChannelStats, orgName: string): string => `
+  <div class="channel-row">
+    <span class="channel-name">${channel.name}</span>
+    <div class="channel-actions">
+      <span class="channel-count">${channel.messageCount} messages</span>
+      <button class="delete-button" data-org="${orgName}" data-channel="${channel.name}">Delete</button>
+    </div>
+  </div>
+`;
+
+const createOrgSection = (org: OrganizationStats, isExpanded: boolean): HTMLElement => {
+  const orgSection = document.createElement('div');
+  orgSection.className = 'org-section';
+  orgSection.setAttribute('data-org-name', org.name);
+
+  const header = document.createElement('div');
+  header.className = 'org-header';
+  header.innerHTML = `
+    <span class="expand-icon">▶</span>
+    <span class="org-name">${org.name}</span>
+    <span class="org-count">${org.messageCount} messages</span>
+  `;
+
+  const channelSection = document.createElement('div');
+  channelSection.className = `channel-section${isExpanded ? ' expanded' : ''}`;
+
+  orgSection.appendChild(header);
+  orgSection.appendChild(channelSection);
+
+  header.addEventListener('click', () => {
+    channelSection.classList.toggle('expanded');
+    header.querySelector('.expand-icon')?.classList.toggle('expanded');
+  });
+
+  return orgSection;
+};
+
+const handleDeleteChannel = async (
+  button: HTMLButtonElement,
+  orgName: string,
+  channelName: string,
+): Promise<void> => {
+  const confirmed = await showConfirmDialog(
+    `Are you sure you want to delete all messages from ${channelName} in ${orgName}?`,
+  );
+
+  if (!confirmed) return;
+
+  const updatedButton = button.cloneNode(true) as HTMLButtonElement;
+  button.replaceWith(updatedButton);
+  updatedButton.disabled = true;
+  updatedButton.classList.add('loading');
+
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'DELETE_CHANNEL_MESSAGES',
+      organization: orgName,
+      channel: channelName,
+    });
+
+    await new Promise<void>((resolve) => {
+      const handleStateUpdate = (message: { type: string }): void => {
+        if (message.type === 'state_update') {
+          chrome.runtime.onMessage.removeListener(handleStateUpdate);
+          resolve();
+        }
+      };
+      chrome.runtime.onMessage.addListener(handleStateUpdate);
+    });
+
+    showNotification(`Successfully deleted messages from ${channelName}`);
+  } catch (error) {
+    const errorDetails = {
+      action: 'Delete Channel Messages',
+      organization: orgName,
+      channel: channelName,
+      timestamp: new Date().toISOString(),
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : error,
+    };
+
+    console.error('Failed to delete messages:', errorDetails);
+    showNotification(
+      `Failed to delete messages from ${channelName}. Check console for details.`,
+      5000,
+    );
+  } finally {
+    const finalButton = updatedButton.cloneNode(true) as HTMLButtonElement;
+    updatedButton.replaceWith(finalButton);
+    finalButton.disabled = false;
+    finalButton.classList.remove('loading');
+  }
+};
+
 const updateMessageStats = (
   container: HTMLElement,
   messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
@@ -163,11 +294,7 @@ const updateMessageStats = (
   // Store currently expanded organizations
   container.querySelectorAll('.org-section').forEach((section) => {
     const orgName = section.querySelector('.org-name')?.textContent;
-    if (
-      orgName !== null &&
-      orgName !== undefined &&
-      section.querySelector('.channel-section.expanded') !== null
-    ) {
+    if (orgName && section.querySelector('.channel-section.expanded')) {
       expandedOrgs.add(orgName);
     }
   });
@@ -177,131 +304,35 @@ const updateMessageStats = (
     let orgSection = container.querySelector(`[data-org-name="${org.name}"]`);
     const isExpanded = expandedOrgs.has(org.name);
 
-    if (orgSection === null) {
-      // Create new organization section
-      orgSection = document.createElement('div');
-      orgSection.className = 'org-section';
-      orgSection.setAttribute('data-org-name', org.name);
+    if (!orgSection) {
+      orgSection = createOrgSection(org, isExpanded);
       container.appendChild(orgSection);
-
-      // Create organization header
-      const header = document.createElement('div');
-      header.className = 'org-header';
-      header.innerHTML = `
-        <span class="expand-icon">▶</span>
-        <span class="org-name">${org.name}</span>
-        <span class="org-count">${org.messageCount} messages</span>
-      `;
-      orgSection.appendChild(header);
-
-      // Create channel section
-      const channelSection = document.createElement('div');
-      channelSection.className = `channel-section${isExpanded ? ' expanded' : ''}`;
-      orgSection.appendChild(channelSection);
-
-      // Add click handler
-      header.addEventListener('click', () => {
-        channelSection.classList.toggle('expanded');
-        header.querySelector('.expand-icon')?.classList.toggle('expanded');
-      });
     } else {
-      // Update existing organization section
-      const header = orgSection.querySelector('.org-header');
-      if (header !== null) {
-        const countElement = header.querySelector('.org-count');
-        if (countElement !== null) {
-          countElement.textContent = `${org.messageCount} messages`;
-        }
+      const countElement = orgSection.querySelector('.org-count');
+      if (countElement) {
+        countElement.textContent = `${org.messageCount} messages`;
       }
     }
 
-    // Update channel section
     const channelSection = orgSection.querySelector('.channel-section');
-    if (channelSection !== null) {
-      // Maintain expanded state
+    if (channelSection) {
       if (isExpanded) {
         channelSection.classList.add('expanded');
         orgSection.querySelector('.expand-icon')?.classList.add('expanded');
       }
 
-      // Update channels
       channelSection.innerHTML = org.channels
-        .map(
-          (channel) => `
-          <div class="channel-row">
-            <span class="channel-name">${channel.name}</span>
-            <div class="channel-actions">
-              <span class="channel-count">${channel.messageCount} messages</span>
-              <button class="delete-button" data-org="${org.name}" data-channel="${channel.name}">Delete</button>
-            </div>
-          </div>
-        `,
-        )
+        .map((channel) => createChannelRow(channel, org.name))
         .join('');
 
-      // Add click handlers for delete buttons
       channelSection.querySelectorAll('.delete-button').forEach((button) => {
         button.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const orgName = (button as HTMLButtonElement).getAttribute('data-org');
-          const channelName = (button as HTMLButtonElement).getAttribute('data-channel');
+          const orgName = button.getAttribute('data-org');
+          const channelName = button.getAttribute('data-channel');
 
           if (orgName && channelName) {
-            const confirmed = await showConfirmDialog(
-              `Are you sure you want to delete all messages from ${channelName} in ${orgName}?`,
-            );
-
-            if (confirmed) {
-              const deleteButton = button as HTMLButtonElement;
-              deleteButton.disabled = true;
-              deleteButton.classList.add('loading');
-
-              try {
-                // Send delete request and wait for response
-                await chrome.runtime.sendMessage({
-                  type: 'DELETE_CHANNEL_MESSAGES',
-                  organization: orgName,
-                  channel: channelName,
-                });
-
-                // Wait for state update message (background will send this)
-                await new Promise<void>((resolve) => {
-                  const handleStateUpdate = (message: { type: string }): void => {
-                    if (message.type === 'state_update') {
-                      chrome.runtime.onMessage.removeListener(handleStateUpdate);
-                      resolve();
-                    }
-                  };
-                  chrome.runtime.onMessage.addListener(handleStateUpdate);
-                });
-
-                showNotification(`Successfully deleted messages from ${channelName}`);
-              } catch (error) {
-                const errorDetails = {
-                  action: 'Delete Channel Messages',
-                  organization: orgName,
-                  channel: channelName,
-                  timestamp: new Date().toISOString(),
-                  error:
-                    error instanceof Error
-                      ? {
-                          name: error.name,
-                          message: error.message,
-                          stack: error.stack,
-                        }
-                      : error,
-                };
-
-                console.error('Failed to delete messages:', errorDetails);
-                showNotification(
-                  `Failed to delete messages from ${channelName}. Check console for details.`,
-                  5000,
-                );
-              } finally {
-                deleteButton.disabled = false;
-                deleteButton.classList.remove('loading');
-              }
-            }
+            await handleDeleteChannel(button as HTMLButtonElement, orgName, channelName);
           }
         });
       });
@@ -310,7 +341,7 @@ const updateMessageStats = (
     // Add divider if not last
     if (index < stats.length - 1) {
       let divider = orgSection.nextElementSibling;
-      if (divider === null || !divider.classList.contains('divider')) {
+      if (!divider?.classList.contains('divider')) {
         divider = document.createElement('div');
         divider.className = 'divider';
         orgSection.after(divider);
@@ -318,10 +349,10 @@ const updateMessageStats = (
     }
   });
 
-  // Remove any organizations that no longer exist
+  // Remove obsolete organizations
   container.querySelectorAll('.org-section').forEach((section) => {
     const orgName = section.getAttribute('data-org-name');
-    if (orgName !== null && !stats.some((org) => org.name === orgName)) {
+    if (orgName && !stats.some((org) => org.name === orgName)) {
       const divider = section.nextElementSibling;
       if (divider?.classList.contains('divider')) {
         divider.remove();
@@ -340,7 +371,6 @@ const calculateTotalMessages = (
     .reduce((sum, messages) => sum + messages.length, 0);
 };
 
-// Handle messages from background script
 const handleMessage = (message: PopupMessage): void => {
   if (message.type === 'state_update') {
     popupState.state = message.state;
@@ -348,7 +378,6 @@ const handleMessage = (message: PopupMessage): void => {
   }
 };
 
-// Send status message to background script
 const sendStatusMessage = (): void => {
   if (popupState.activeTabId !== null) {
     const message: StatusMessage = {
@@ -360,13 +389,27 @@ const sendStatusMessage = (): void => {
   }
 };
 
-// Start periodic sync
 const startSync = (): void => {
+  // Clear any existing interval
+  if (popupState.syncIntervalId) {
+    clearInterval(popupState.syncIntervalId);
+  }
+
+  // Send initial status message
   sendStatusMessage();
-  window.setInterval(sendStatusMessage, POPUP_SYNC_INTERVAL);
+
+  // Start new interval and store the ID
+  popupState.syncIntervalId = window.setInterval(sendStatusMessage, POPUP_SYNC_INTERVAL);
 };
 
-function showNotification(message: string, duration: number = 3000): void {
+const stopSync = (): void => {
+  if (popupState.syncIntervalId) {
+    clearInterval(popupState.syncIntervalId);
+    delete popupState.syncIntervalId;
+  }
+};
+
+const showNotification = (message: string, duration: number = NOTIFICATION_DURATION): void => {
   const notification = document.getElementById('notification');
   if (!notification) return;
 
@@ -376,9 +419,9 @@ function showNotification(message: string, duration: number = 3000): void {
   setTimeout(() => {
     notification.classList.remove('visible');
   }, duration);
-}
+};
 
-function showConfirmDialog(message: string): Promise<boolean> {
+const showConfirmDialog = (message: string): Promise<boolean> => {
   return new Promise((resolve) => {
     const dialog = document.getElementById('confirmDialog');
     const messageEl = document.getElementById('confirmMessage');
@@ -412,23 +455,9 @@ function showConfirmDialog(message: string): Promise<boolean> {
     confirmButton.addEventListener('click', handleConfirm);
     cancelButton.addEventListener('click', handleCancel);
   });
-}
+};
 
-// Initialize popup
-const initialize = async (): Promise<void> => {
-  // Get active tab
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const activeTab = tabs[0];
-
-  if (activeTab?.id !== undefined) {
-    popupState.activeTabId = activeTab.id;
-    popupState.isConnected = activeTab.url?.includes('slack.com') ?? false;
-  }
-
-  // Set up message listener
-  chrome.runtime.onMessage.addListener(handleMessage);
-
-  // Set up button handlers
+const setupButtonHandlers = (tabId: number): void => {
   const startButton = document.getElementById('startButton');
   const stopButton = document.getElementById('stopButton');
   const downloadButton = document.getElementById('downloadButton');
@@ -440,20 +469,16 @@ const initialize = async (): Promise<void> => {
 
   startButton?.addEventListener('click', () => {
     const message: ExtractionControlMessage = { type: 'START_EXTRACTION' };
-    if (popupState.activeTabId !== null) {
-      void chrome.tabs.sendMessage(popupState.activeTabId, message);
-    }
+    void chrome.tabs.sendMessage(tabId, message);
   });
 
   stopButton?.addEventListener('click', () => {
     const message: ExtractionControlMessage = { type: 'STOP_EXTRACTION' };
-    if (popupState.activeTabId !== null) {
-      void chrome.tabs.sendMessage(popupState.activeTabId, message);
-    }
+    void chrome.tabs.sendMessage(tabId, message);
   });
 
   downloadButton?.addEventListener('click', () => {
-    if (popupState.state !== null) {
+    if (popupState.state) {
       const data = JSON.stringify(popupState.state.extractedMessages, null, 2);
       const blob = new Blob([data], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -466,20 +491,34 @@ const initialize = async (): Promise<void> => {
       URL.revokeObjectURL(url);
     }
   });
+};
 
-  // Start sync and update UI
+const initialize = async (): Promise<void> => {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+
+  if (activeTab?.id !== undefined) {
+    popupState.activeTabId = activeTab.id;
+    popupState.isConnected = activeTab.url?.includes('slack.com') ?? false;
+    setupButtonHandlers(activeTab.id);
+  }
+
+  chrome.runtime.onMessage.addListener(handleMessage);
   startSync();
   updateUI();
 };
 
-// Initialize when DOM is loaded
+// Clean up when popup is closed
+window.addEventListener('unload', () => {
+  stopSync();
+  chrome.runtime.onMessage.removeListener(handleMessage);
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   void initialize();
 });
 
-// Add styles for the spinner
-const style = document.createElement('style');
-style.textContent = `
+const spinnerStyles = `
   .delete-button {
     position: relative;
   }
@@ -507,4 +546,7 @@ style.textContent = `
     to { transform: rotate(360deg); }
   }
 `;
+
+const style = document.createElement('style');
+style.textContent = spinnerStyles;
 document.head.appendChild(style);
