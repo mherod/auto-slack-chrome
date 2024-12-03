@@ -32,7 +32,7 @@ module.exports = {
         { from: 'src/popup.html', to: 'popup.html' },
         {
           from: 'scripts/icons/*.svg',
-          to: ({ context, absoluteFilename }) => {
+          to: ({ _context, absoluteFilename }) => {
             const basename = path.basename(absoluteFilename, '.svg');
             return `${basename}.png`;
           },
