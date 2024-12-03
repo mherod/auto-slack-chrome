@@ -12,6 +12,12 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].js',
+    environment: {
+      module: true
+    }
+  },
+  experiments: {
+    outputModule: true
   },
   module: {
     rules: [
