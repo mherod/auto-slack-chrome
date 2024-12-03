@@ -30,7 +30,7 @@
   },
   "lint-staged": {
     "*.ts": [
-      "eslint --fix",
+      "eslint --config eslint.config.cjs --fix",
       "prettier --write"
     ]
   },
