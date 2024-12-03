@@ -25,7 +25,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "husky install",
     "pre-commit": "lint-staged && pnpm type-check && pnpm build",
-    "package": "pnpm build && cd dist && zip -r ../extension.zip ."
+    "package": "pnpm build && cd dist && zip -r ../extension.zip .",
+    "icons": "node scripts/generate-icons.js"
   },
   "lint-staged": {
     "*.ts": [
@@ -58,6 +59,7 @@
     "husky": "^9.0.11",
     "lint-staged": "^15.2.2",
     "prettier": "^3.4.1",
+    "sharp": "0.33.5",
     "ts-loader": "^9.5.1",
     "typescript": "^5.7.2",
     "webpack": "^5.96.1",
