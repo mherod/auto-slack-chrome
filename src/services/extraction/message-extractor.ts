@@ -47,7 +47,8 @@ export class MessageExtractor {
       const orgMatch = window.location.hostname.match(/^([^.]+)\.slack\.com$/);
       const organization = orgMatch?.at(1)?.trim() ?? '';
 
-      if (channel && organization) {
+      // Reject 'app' as a valid organization
+      if (channel && organization && organization !== 'app') {
         return {
           channel,
           organization,
