@@ -30,7 +30,20 @@ export class MessageExtractor {
     const searchChannelName = document.querySelector('.c-channel_entity__name');
     if (searchChannelName !== null) {
       const channel = searchChannelName.textContent?.trim() ?? '';
-      // Get organization from URL since it's not in the search view
+
+      // Check if we're in search view
+      const searchMatch = document.title.match(/^Search - (.+?) - Slack$/);
+      if (searchMatch?.at(1) !== undefined) {
+        const organization = searchMatch[1].trim();
+        if (channel && organization) {
+          return {
+            channel,
+            organization,
+          };
+        }
+      }
+
+      // Fallback to URL-based organization if not in search
       const orgMatch = window.location.hostname.match(/^([^.]+)\.slack\.com$/);
       const organization = orgMatch?.at(1)?.trim() ?? '';
 
