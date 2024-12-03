@@ -58,7 +58,7 @@ type OutgoingMessage = StateUpdateMessage;
 
 const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
 const CLEANUP_INTERVAL = 60000; // 1 minute
-const SYNC_INTERVAL = 30000; // 30 seconds
+const SYNC_INTERVAL = 30000;
 
 const tabStates = new Map<number, TabState>();
 
@@ -88,6 +88,16 @@ const broadcastStateUpdate = (tabId: number): void => {
   void chrome.runtime.sendMessage(message).catch(() => {
     // Ignore chrome.runtime errors when context is invalidated
   });
+};
+
+// Reload all Slack tabs
+const reloadSlackTabs = async (): Promise<void> => {
+  const tabs = await chrome.tabs.query({ url: 'https://app.slack.com/*' });
+  for (const tab of tabs) {
+    if (tab.id !== undefined) {
+      void chrome.tabs.reload(tab.id);
+    }
+  }
 };
 
 // Handle incoming messages
@@ -193,6 +203,11 @@ const stopIntervals = (): void => {
 startIntervals();
 
 // Handle extension reload/update
+chrome.runtime.onInstalled.addListener(() => {
+  void reloadSlackTabs();
+});
+
+// Handle extension suspend
 chrome.runtime.onSuspend.addListener(() => {
   stopIntervals();
 });
