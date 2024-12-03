@@ -1,17 +1,60 @@
 import type { IncomingMessage } from './services/extraction';
-import { ConnectionService } from './services/extraction/connection';
-import { MessageExtractor } from './services/extraction/message-extractor';
-import { MonitorService } from './services/extraction/monitor';
-import { StorageService } from './services/extraction/storage';
+import {
+  ConnectionService,
+  MessageExtractor,
+  MonitorService,
+  StorageService,
+} from './services/extraction';
 
-// Initialize services
-const messageExtractor = new MessageExtractor();
-const storageService = new StorageService();
 let monitorService: MonitorService;
 let connectionService: ConnectionService;
+let messageExtractor: MessageExtractor;
+let storageService: StorageService;
+
+const RETRY_DELAY = 1000; // 1 second
+const MAX_RETRIES = 3;
+let retryCount = 0;
+
+const isContextInvalidated = (error: unknown): boolean => {
+  if (error instanceof Error) {
+    return error.message.includes('Extension context invalidated');
+  }
+  if (chrome.runtime.lastError) {
+    return chrome.runtime.lastError.message?.includes('Extension context invalidated') ?? false;
+  }
+  return false;
+};
+
+const handleContextInvalidation = (): void => {
+  if (retryCount >= MAX_RETRIES) {
+    console.error('Max retries reached for context invalidation recovery');
+    return;
+  }
+
+  retryCount++;
+  console.log(
+    `Attempting to recover from context invalidation (attempt ${retryCount}/${MAX_RETRIES})`,
+  );
+
+  // Clean up existing services
+  stopConnectionCheck();
+  if (typeof monitorService !== 'undefined') {
+    void monitorService.stopMonitoring();
+  }
+
+  // Attempt to reinitialize after a delay
+  window.setTimeout(() => {
+    initializeServices();
+    startConnectionCheck();
+  }, RETRY_DELAY * retryCount); // Exponential backoff
+};
 
 const initializeServices = (): void => {
   try {
+    // Initialize services
+    messageExtractor = new MessageExtractor();
+    storageService = new StorageService();
+
     // Initialize monitor service first since connection service needs its state
     monitorService = new MonitorService(
       messageExtractor,
@@ -23,14 +66,20 @@ const initializeServices = (): void => {
             type: 'EXTRACTION_STATUS',
             status: `Now monitoring ${channelInfo.channel}...`,
           })
-          .catch(() => {
-            // Ignore chrome.runtime errors when context is invalidated
+          .catch((error) => {
+            if (isContextInvalidated(error)) {
+              handleContextInvalidation();
+            }
           });
       },
       () => {
         // Handle sync request
         if (connectionService !== undefined && connectionService.isConnected()) {
-          void connectionService.sendSync();
+          void connectionService.sendSync().catch((error) => {
+            if (isContextInvalidated(error)) {
+              handleContextInvalidation();
+            }
+          });
         }
       },
     );
@@ -39,32 +88,22 @@ const initializeServices = (): void => {
     connectionService = new ConnectionService(
       () => {
         // Handle connection loss
+        if (isContextInvalidated(chrome.runtime.lastError)) {
+          handleContextInvalidation();
+        }
       },
       () => monitorService.getCurrentState(),
     );
 
     // Initialize connection
     connectionService.initializeConnection();
-  } catch (error) {
-    // Log error and attempt to reinitialize
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    void chrome.runtime
-      .sendMessage({
-        type: 'ERROR',
-        error: `Failed to initialize services: ${errorMessage}`,
-      })
-      .catch(() => {
-        // Ignore chrome.runtime errors when context is invalidated
-      });
 
-    // Attempt to reinitialize after a delay if it was a context invalidation
-    const lastError = chrome.runtime.lastError;
-    if (
-      lastError !== undefined &&
-      lastError.message !== undefined &&
-      lastError.message.includes('Extension context invalidated')
-    ) {
-      window.setTimeout(initializeServices, 1000);
+    // Reset retry count on successful initialization
+    retryCount = 0;
+  } catch (error) {
+    console.error('Failed to initialize services:', error);
+    if (isContextInvalidated(error)) {
+      handleContextInvalidation();
     }
   }
 };
@@ -78,29 +117,38 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
     } else if (message.type === 'sync' && 'data' in message) {
       // Handle sync message
       const currentState = monitorService.getCurrentState();
-      void storageService.mergeAndSaveMessages(
-        currentState.extractedMessages,
-        message.data.extractedMessages,
-      );
+      void storageService
+        .mergeAndSaveMessages(currentState.extractedMessages, message.data.extractedMessages)
+        .catch((error) => {
+          if (isContextInvalidated(error)) {
+            handleContextInvalidation();
+          }
+        });
       sendResponse({ success: true });
     } else if (message.type === 'START_EXTRACTION') {
-      void monitorService.startMonitoring();
+      void monitorService.startMonitoring().catch((error) => {
+        if (isContextInvalidated(error)) {
+          handleContextInvalidation();
+        }
+      });
       sendResponse({ success: true });
     } else if (message.type === 'STOP_EXTRACTION') {
-      void monitorService.stopMonitoring();
+      void monitorService.stopMonitoring().catch((error) => {
+        if (isContextInvalidated(error)) {
+          handleContextInvalidation();
+        }
+      });
       sendResponse({ success: true });
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    void chrome.runtime
-      .sendMessage({
-        type: 'ERROR',
-        error: `Error handling message: ${errorMessage}`,
-      })
-      .catch(() => {
-        // Ignore chrome.runtime errors when context is invalidated
-      });
-    sendResponse({ success: false, error: errorMessage });
+    console.error('Error handling message:', error);
+    if (isContextInvalidated(error)) {
+      handleContextInvalidation();
+    }
+    sendResponse({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
   return true;
 });
@@ -116,24 +164,9 @@ const startConnectionCheck = (): void => {
           connectionService.checkConnection();
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        void chrome.runtime
-          .sendMessage({
-            type: 'ERROR',
-            error: `Connection check failed: ${errorMessage}`,
-          })
-          .catch(() => {
-            // Ignore chrome.runtime errors when context is invalidated
-          });
-
-        const lastError = chrome.runtime.lastError;
-        if (
-          lastError !== undefined &&
-          lastError.message !== undefined &&
-          lastError.message.includes('Extension context invalidated')
-        ) {
-          stopConnectionCheck();
-          window.setTimeout(initializeServices, 1000);
+        console.error('Connection check failed:', error);
+        if (isContextInvalidated(error)) {
+          handleContextInvalidation();
         }
       }
     }, 15000); // 15 seconds
@@ -154,4 +187,7 @@ startConnectionCheck();
 // Cleanup on unload
 window.addEventListener('unload', () => {
   stopConnectionCheck();
+  if (typeof monitorService !== 'undefined') {
+    void monitorService.stopMonitoring();
+  }
 });
