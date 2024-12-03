@@ -16,8 +16,8 @@
     "pnpm": ">=8.0.0"
   },
   "scripts": {
-    "build": "webpack --config webpack.config.js",
-    "watch": "webpack --config webpack.config.js --watch",
+    "build": "webpack --config webpack.config.cjs",
+    "watch": "webpack --config webpack.config.cjs --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint --config eslint.config.cjs src/**/*.ts",
     "lint:fix": "eslint --config eslint.config.cjs src/**/*.ts --fix",
