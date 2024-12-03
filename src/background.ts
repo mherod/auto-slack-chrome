@@ -17,15 +17,17 @@ interface TabState {
   state: BackgroundState | null;
 }
 
+interface ChannelInfo {
+  channel: string;
+  organization: string;
+}
+
 interface HeartbeatMessage {
   type: 'heartbeat';
   timestamp: number;
   status: {
     isExtracting: boolean;
-    channelInfo: {
-      channel: string;
-      organization: string;
-    } | null;
+    channelInfo: ChannelInfo | null;
     messageCount: number;
   };
 }
@@ -35,10 +37,7 @@ interface SyncMessage {
   timestamp: number;
   data: {
     extractedMessages: MessagesByOrganization;
-    currentChannel: {
-      channel: string;
-      organization: string;
-    } | null;
+    currentChannel: ChannelInfo | null;
   };
 }
 
@@ -54,15 +53,13 @@ interface StateUpdateMessage {
   state: BackgroundState;
 }
 
-type IncomingMessage =
-  | HeartbeatMessage
-  | SyncMessage
-  | PopupStatusMessage
-  | {
-      type: 'DELETE_CHANNEL_MESSAGES';
-      organization: string;
-      channel: string;
-    };
+interface DeleteChannelMessage {
+  type: 'DELETE_CHANNEL_MESSAGES';
+  organization: string;
+  channel: string;
+}
+
+type IncomingMessage = HeartbeatMessage | SyncMessage | PopupStatusMessage | DeleteChannelMessage;
 type OutgoingMessage = StateUpdateMessage;
 
 const HEARTBEAT_TIMEOUT = 10000; // 10 seconds
@@ -70,26 +67,30 @@ const CLEANUP_INTERVAL = 10000; // 10 seconds
 const SYNC_INTERVAL = 10000; // 10 seconds
 
 const tabStates = new Map<number, TabState>();
-
-// Initialize services
 const storageService = new StorageService();
 
-// Clean up disconnected tabs
+const createInitialState = (
+  isExtracting: boolean,
+  currentChannel: ChannelInfo | null,
+  extractedMessages: MessagesByOrganization = {},
+): BackgroundState => ({
+  isExtracting,
+  currentChannel,
+  extractedMessages,
+});
+
 const cleanupTabs = (): void => {
   const now = Date.now();
-  Array.from(tabStates.entries()).forEach(([tabId, state]) => {
-    const timeSinceLastHeartbeat = now - state.lastHeartbeat;
-    if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT) {
+  for (const [tabId, state] of tabStates.entries()) {
+    if (now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
       tabStates.delete(tabId);
     }
-  });
+  }
 };
 
-// Send state update to all connected popups
 const broadcastStateUpdate = (tabId: number): void => {
   const tabState = tabStates.get(tabId);
-  if (tabState?.state === null) return;
-  if (tabState === undefined) return;
+  if (!tabState?.state) return;
 
   const message: OutgoingMessage = {
     type: 'state_update',
@@ -102,75 +103,99 @@ const broadcastStateUpdate = (tabId: number): void => {
   });
 };
 
-// Reload all Slack tabs
 const reloadSlackTabs = async (): Promise<void> => {
   const tabs = await chrome.tabs.query({ url: 'https://app.slack.com/*' });
   for (const tab of tabs) {
-    if (tab.id !== undefined) {
+    if (tab.id) {
       void chrome.tabs.reload(tab.id);
     }
   }
 };
 
-// Handle incoming messages
+const handleHeartbeat = (
+  message: HeartbeatMessage,
+  tabId: number,
+  sendResponse: (response: { success: boolean }) => void,
+): void => {
+  const { timestamp, status } = message;
+  let tabState = tabStates.get(tabId);
+
+  if (!tabState) {
+    tabState = {
+      lastHeartbeat: timestamp,
+      state: createInitialState(status.isExtracting, status.channelInfo),
+    };
+    tabStates.set(tabId, tabState);
+  } else {
+    tabState.lastHeartbeat = timestamp;
+    if (tabState.state) {
+      tabState.state.isExtracting = status.isExtracting;
+      tabState.state.currentChannel = status.channelInfo;
+    }
+  }
+
+  broadcastStateUpdate(tabId);
+  sendResponse({ success: true });
+};
+
+const handleSync = (
+  message: SyncMessage,
+  tabId: number,
+  sendResponse: (response: { success: boolean }) => void,
+): void => {
+  const { timestamp, data } = message;
+  let tabState = tabStates.get(tabId);
+
+  if (!tabState) {
+    tabState = {
+      lastHeartbeat: timestamp,
+      state: createInitialState(false, data.currentChannel, data.extractedMessages),
+    };
+    tabStates.set(tabId, tabState);
+  } else {
+    tabState.lastHeartbeat = timestamp;
+    if (tabState.state) {
+      tabState.state.currentChannel = data.currentChannel;
+      tabState.state.extractedMessages = data.extractedMessages;
+    }
+  }
+
+  broadcastStateUpdate(tabId);
+  sendResponse({ success: true });
+};
+
+const handlePopupStatus = (
+  message: PopupStatusMessage,
+  sendResponse: (response: { state: BackgroundState | null }) => void,
+): void => {
+  const tabState = tabStates.get(message.tabId);
+  sendResponse({ state: tabState?.state ?? null });
+};
+
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse): boolean => {
   try {
-    if (message.type === 'heartbeat') {
-      const { timestamp, status } = message;
-      const tabId = _sender.tab?.id;
-      if (tabId === undefined) return false;
+    const tabId = _sender.tab?.id;
 
-      let tabState = tabStates.get(tabId);
-      if (tabState === undefined) {
-        tabState = {
-          lastHeartbeat: timestamp,
-          state: {
-            isExtracting: status.isExtracting,
-            currentChannel: status.channelInfo,
-            extractedMessages: {},
-          },
-        };
-        tabStates.set(tabId, tabState);
-      } else {
-        tabState.lastHeartbeat = timestamp;
-        if (tabState.state !== null) {
-          tabState.state.isExtracting = status.isExtracting;
-          tabState.state.currentChannel = status.channelInfo;
-        }
-      }
+    // Handle popup status messages which don't require a tab ID
+    if (message.type === 'popup_status') {
+      handlePopupStatus(message, sendResponse);
+      return true;
+    }
 
-      broadcastStateUpdate(tabId);
-      sendResponse({ success: true });
-    } else if (message.type === 'sync') {
-      const { timestamp, data } = message;
-      const tabId = _sender.tab?.id;
-      if (tabId === undefined) return false;
+    // For other message types, ensure we have a valid tab ID
+    if (tabId === undefined || tabId === 0) {
+      console.error('No valid tab ID for message:', message.type);
+      sendResponse({ success: false, error: 'No valid tab ID' });
+      return false;
+    }
 
-      let tabState = tabStates.get(tabId);
-      if (tabState === undefined) {
-        tabState = {
-          lastHeartbeat: timestamp,
-          state: {
-            isExtracting: false,
-            currentChannel: data.currentChannel,
-            extractedMessages: data.extractedMessages,
-          },
-        };
-        tabStates.set(tabId, tabState);
-      } else {
-        tabState.lastHeartbeat = timestamp;
-        if (tabState.state !== null) {
-          tabState.state.currentChannel = data.currentChannel;
-          tabState.state.extractedMessages = data.extractedMessages;
-        }
-      }
-
-      broadcastStateUpdate(tabId);
-      sendResponse({ success: true });
-    } else if (message.type === 'popup_status') {
-      const { tabId } = message;
-      const tabState = tabStates.get(tabId);
-      sendResponse({ state: tabState?.state ?? null });
+    switch (message.type) {
+      case 'heartbeat':
+        handleHeartbeat(message, tabId, sendResponse);
+        break;
+      case 'sync':
+        handleSync(message, tabId, sendResponse);
+        break;
     }
   } catch (error) {
     console.error('Error handling message:', error);
@@ -183,78 +208,66 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   return true;
 });
 
-// Set up periodic cleanup
-let cleanupInterval: number | null = null;
-let syncInterval: number | null = null;
-
 const startIntervals = (): void => {
-  if (cleanupInterval === null) {
-    cleanupInterval = self.setInterval(cleanupTabs, CLEANUP_INTERVAL);
-  }
-  if (syncInterval === null) {
-    syncInterval = self.setInterval(() => {
-      Array.from(tabStates.keys()).forEach((tabId) => {
-        broadcastStateUpdate(tabId);
-      });
-    }, SYNC_INTERVAL);
-  }
+  cleanupInterval ??= self.setInterval(cleanupTabs, CLEANUP_INTERVAL);
+  syncInterval ??= self.setInterval(() => {
+    for (const tabId of tabStates.keys()) {
+      broadcastStateUpdate(tabId);
+    }
+  }, SYNC_INTERVAL);
 };
 
 const stopIntervals = (): void => {
-  if (cleanupInterval !== null) {
+  if (cleanupInterval) {
     self.clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
-  if (syncInterval !== null) {
+  if (syncInterval) {
     self.clearInterval(syncInterval);
     syncInterval = null;
   }
 };
 
-// Start intervals
+let cleanupInterval: number | null = null;
+let syncInterval: number | null = null;
+
 startIntervals();
 
-// Handle extension reload/update
 chrome.runtime.onInstalled.addListener(() => {
   void reloadSlackTabs();
 });
 
-// Handle extension suspend
 chrome.runtime.onSuspend.addListener(() => {
   stopIntervals();
 });
 
-// Handle messages from popup and content script
+const broadcastStateToTabs = async (state: BackgroundState): Promise<void> => {
+  const tabs = await chrome.tabs.query({});
+  const updatePromises = tabs.map(async (tab) => {
+    if (tab.id && tab.id !== 0) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          type: 'state_update',
+          timestamp: Date.now(),
+          state,
+        });
+      } catch {
+        console.debug('Could not send state update to tab:', tab.id);
+      }
+    }
+  });
+
+  await Promise.all(updatePromises);
+};
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'DELETE_CHANNEL_MESSAGES') {
     void (async (): Promise<void> => {
       try {
         await storageService.deleteChannelMessages(message.organization, message.channel);
-
-        // Get updated state
         const state = await storageService.loadState();
 
-        // Broadcast state update to all tabs
-        const tabs = await chrome.tabs.query({});
-        const updatePromises = tabs.map(async (tab) => {
-          if (tab.id !== undefined && tab.id !== null && tab.id !== 0) {
-            try {
-              await chrome.tabs.sendMessage(tab.id, {
-                type: 'state_update',
-                timestamp: Date.now(),
-                state,
-              });
-            } catch {
-              // Ignore errors for tabs that don't have listeners
-              console.debug('Could not send state update to tab:', tab.id);
-            }
-          }
-        });
-
-        // Wait for all tab updates
-        await Promise.all(updatePromises);
-
-        // Send state update to popup
+        await broadcastStateToTabs(state);
         await chrome.runtime.sendMessage({
           type: 'state_update',
           timestamp: Date.now(),
@@ -270,7 +283,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       }
     })();
-    return true; // Will respond asynchronously
+    return true;
   }
   return false;
 });

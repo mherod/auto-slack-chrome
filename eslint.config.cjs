@@ -49,7 +49,10 @@ module.exports = [
       ],
       '@typescript-eslint/strict-boolean-expressions': [
         'warn',
-        { allowNullableBoolean: true },
+        {
+          allowNullableBoolean: true,
+          allowNumber: true,
+        },
       ],
       '@typescript-eslint/no-floating-promises': [
         'error',
