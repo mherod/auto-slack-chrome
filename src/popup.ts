@@ -188,15 +188,54 @@ const calculateMessageStats = (
     .sort((a, b) => b.messageCount - a.messageCount);
 };
 
-const createChannelRow = (channel: ChannelStats, orgName: string): string => `
-  <div class="channel-row">
-    <span class="channel-name">${channel.name}</span>
-    <div class="channel-actions">
-      <span class="channel-count">${channel.messageCount} messages</span>
-      <button class="delete-button" data-org="${orgName}" data-channel="${channel.name}">Delete</button>
+const getWorkspaceUrl = (messages: SlackMessage[]): string | null => {
+  // Find the first message with a permalink
+  const firstMessageWithPermalink = messages.find(
+    (msg) => msg.permalink !== null && msg.permalink !== '',
+  );
+  if (!firstMessageWithPermalink?.permalink) return null;
+
+  // Extract the workspace URL (https://workspace.slack.com)
+  const match = firstMessageWithPermalink.permalink.match(/^(https:\/\/[^/]+)/);
+  return match?.[1] ?? null;
+};
+
+const createChannelRow = (
+  channel: ChannelStats,
+  orgName: string,
+  messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
+): string => {
+  const channelMessages = messages[orgName]?.[channel.name];
+  let workspaceUrl: string | null = null;
+
+  if (channelMessages !== undefined && Object.keys(channelMessages).length > 0) {
+    // Get messages from the first date
+    const firstDateMessages = Object.values(channelMessages)[0] ?? [];
+    workspaceUrl = getWorkspaceUrl(firstDateMessages);
+  }
+
+  // Create channel URL - for DMs we keep the original name, for channels we prefix with #
+  const channelPath = channel.name.startsWith('D') ? channel.name : `#${channel.name}`;
+  const channelUrl = workspaceUrl !== null ? `${workspaceUrl}/messages/${channelPath}` : null;
+
+  const channelNameHtml =
+    channelUrl !== null
+      ? `<a href="${channelUrl}" target="_blank" class="channel-link">
+         <span class="channel-name">${channel.name}</span>
+         <span class="channel-link-icon">↗</span>
+       </a>`
+      : `<span class="channel-name">${channel.name}</span>`;
+
+  return `
+    <div class="channel-row">
+      ${channelNameHtml}
+      <div class="channel-actions">
+        <span class="channel-count">${channel.messageCount} messages</span>
+        <button class="delete-button" data-org="${orgName}" data-channel="${channel.name}">Delete</button>
+      </div>
     </div>
-  </div>
-`;
+  `;
+};
 
 const createOrgSection = (org: OrganizationStats, isExpanded: boolean): HTMLElement => {
   const orgSection = document.createElement('div');
@@ -225,65 +264,6 @@ const createOrgSection = (org: OrganizationStats, isExpanded: boolean): HTMLElem
   return orgSection;
 };
 
-const handleDeleteChannel = async (
-  button: HTMLButtonElement,
-  orgName: string,
-  channelName: string,
-): Promise<void> => {
-  const confirmed = await showConfirmDialog(
-    `Are you sure you want to delete all messages from ${channelName} in ${orgName}?`,
-  );
-
-  if (!confirmed) return;
-
-  const updatedButton = button.cloneNode(true) as HTMLButtonElement;
-  button.replaceWith(updatedButton);
-  updatedButton.disabled = true;
-  updatedButton.classList.add('loading');
-
-  try {
-    await chrome.runtime.sendMessage({
-      type: 'DELETE_CHANNEL_MESSAGES',
-      organization: orgName,
-      channel: channelName,
-    });
-
-    await new Promise<void>((resolve) => {
-      const handleStateUpdate = (message: { type: string }): void => {
-        if (message.type === 'state_update') {
-          chrome.runtime.onMessage.removeListener(handleStateUpdate);
-          resolve();
-        }
-      };
-      chrome.runtime.onMessage.addListener(handleStateUpdate);
-    });
-
-    showNotification(`Successfully deleted messages from ${channelName}`);
-  } catch (error) {
-    const errorDetails = {
-      action: 'Delete Channel Messages',
-      organization: orgName,
-      channel: channelName,
-      timestamp: new Date().toISOString(),
-      error:
-        error instanceof Error
-          ? { name: error.name, message: error.message, stack: error.stack }
-          : error,
-    };
-
-    console.error('Failed to delete messages:', errorDetails);
-    showNotification(
-      `Failed to delete messages from ${channelName}. Check console for details.`,
-      5000,
-    );
-  } finally {
-    const finalButton = updatedButton.cloneNode(true) as HTMLButtonElement;
-    updatedButton.replaceWith(finalButton);
-    finalButton.disabled = false;
-    finalButton.classList.remove('loading');
-  }
-};
-
 const updateMessageStats = (
   container: HTMLElement,
   messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
@@ -293,8 +273,8 @@ const updateMessageStats = (
 
   // Store currently expanded organizations
   container.querySelectorAll('.org-section').forEach((section) => {
-    const orgName = section.querySelector('.org-name')?.textContent;
-    if (orgName && section.querySelector('.channel-section.expanded')) {
+    const orgName = section.querySelector('.org-name')?.textContent ?? '';
+    if (orgName !== '' && section.querySelector('.channel-section.expanded')) {
       expandedOrgs.add(orgName);
     }
   });
@@ -322,17 +302,55 @@ const updateMessageStats = (
       }
 
       channelSection.innerHTML = org.channels
-        .map((channel) => createChannelRow(channel, org.name))
+        .map((channel) => createChannelRow(channel, org.name, messages))
         .join('');
 
+      // Add click handlers for delete buttons
       channelSection.querySelectorAll('.delete-button').forEach((button) => {
         button.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const orgName = button.getAttribute('data-org');
-          const channelName = button.getAttribute('data-channel');
+          const orgName = (button as HTMLButtonElement).getAttribute('data-org');
+          const channelName = (button as HTMLButtonElement).getAttribute('data-channel');
 
-          if (orgName && channelName) {
-            await handleDeleteChannel(button as HTMLButtonElement, orgName, channelName);
+          if (orgName !== null && orgName !== '' && channelName !== null && channelName !== '') {
+            const confirmed = await showConfirmDialog(
+              `Are you sure you want to delete all messages from ${channelName} in ${orgName}?`,
+            );
+
+            if (confirmed) {
+              const deleteButton = button as HTMLButtonElement;
+              deleteButton.disabled = true;
+              deleteButton.classList.add('loading');
+
+              try {
+                await chrome.runtime.sendMessage({
+                  type: 'DELETE_CHANNEL_MESSAGES',
+                  organization: orgName,
+                  channel: channelName,
+                });
+
+                await new Promise<void>((resolve) => {
+                  const handleStateUpdate = (message: { type: string }): void => {
+                    if (message.type === 'state_update') {
+                      chrome.runtime.onMessage.removeListener(handleStateUpdate);
+                      resolve();
+                    }
+                  };
+                  chrome.runtime.onMessage.addListener(handleStateUpdate);
+                });
+
+                showNotification(`Successfully deleted messages from ${channelName}`);
+              } catch (error) {
+                console.error('Failed to delete messages:', error);
+                showNotification(
+                  `Failed to delete messages from ${channelName}. Check console for details.`,
+                  5000,
+                );
+              } finally {
+                deleteButton.disabled = false;
+                deleteButton.classList.remove('loading');
+              }
+            }
           }
         });
       });
@@ -352,7 +370,7 @@ const updateMessageStats = (
   // Remove obsolete organizations
   container.querySelectorAll('.org-section').forEach((section) => {
     const orgName = section.getAttribute('data-org-name');
-    if (orgName && !stats.some((org) => org.name === orgName)) {
+    if (orgName !== null && orgName !== '' && !stats.some((org) => org.name === orgName)) {
       const divider = section.nextElementSibling;
       if (divider?.classList.contains('divider')) {
         divider.remove();
@@ -379,7 +397,7 @@ const handleMessage = (message: PopupMessage): void => {
 };
 
 const sendStatusMessage = (): void => {
-  if (popupState.activeTabId !== null) {
+  if (popupState.activeTabId !== null && popupState.activeTabId !== 0) {
     const message: StatusMessage = {
       type: 'popup_status',
       timestamp: Date.now(),
@@ -391,7 +409,7 @@ const sendStatusMessage = (): void => {
 
 const startSync = (): void => {
   // Clear any existing interval
-  if (popupState.syncIntervalId) {
+  if (popupState.syncIntervalId !== undefined && popupState.syncIntervalId !== 0) {
     clearInterval(popupState.syncIntervalId);
   }
 
@@ -403,7 +421,7 @@ const startSync = (): void => {
 };
 
 const stopSync = (): void => {
-  if (popupState.syncIntervalId) {
+  if (popupState.syncIntervalId !== undefined && popupState.syncIntervalId !== 0) {
     clearInterval(popupState.syncIntervalId);
     delete popupState.syncIntervalId;
   }

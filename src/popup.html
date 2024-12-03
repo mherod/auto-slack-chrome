@@ -1,39 +1,102 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Slack Message Extractor</title>
   <style>
+    @supports (font-variation-settings: normal) {
+      :root { font-family: system-ui; }
+    }
+
+    :root {
+      --primary-color: #1264a3;
+      --danger-color: #e01e5a;
+      --success-color: #007a5a;
+      --text-primary: #1d1c1d;
+      --text-secondary: #616061;
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f8f8;
+      --border-radius: 8px;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+      --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+      --transition: all 0.2s ease;
+
+      /* Typography */
+      --font-primary: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+      --line-height-normal: 1.5;
+      --line-height-tight: 1.25;
+      --letter-spacing-tight: -0.015em;
+      --letter-spacing-normal: 0;
+      --font-size-sm: 12px;
+      --font-size-base: 14px;
+      --font-size-lg: 16px;
+
+      /* Font Optimization */
+      --font-display: swap;
+      --font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "pnum" 1, "tnum" 0, "onum" 0, "lnum" 0, "dlig" 0;
+    }
+
     body {
       width: 400px;
       padding: 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-primary);
+      font-feature-settings: var(--font-feature-settings);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-synthesis: none;
+      font-optical-sizing: auto;
+      font-kerning: normal;
+      font-variant-ligatures: common-ligatures contextual;
+      font-variant-numeric: proportional-nums;
+      color: var(--text-primary);
+      background: var(--bg-primary);
+      margin: 0;
+      font-size: var(--font-size-base);
+      line-height: var(--line-height-normal);
     }
 
     .container {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
     }
 
     .info-panel {
-      background: #f5f5f5;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 14px;
+      background: var(--bg-secondary);
+      padding: 16px;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+    }
+
+    .info-panel:hover {
+      box-shadow: var(--shadow-md);
     }
 
     .status {
-      font-weight: 500;
-      color: #1264a3;
+      font-weight: 600;
+      color: var(--primary-color);
+      margin-bottom: 8px;
+      font-size: var(--font-size-lg);
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-tight);
     }
 
     .channel-info {
-      color: #616061;
+      color: var(--text-secondary);
+      font-size: var(--font-size-base);
+      line-height: var(--line-height-normal);
     }
 
     .message-count {
-      color: #1264a3;
-      font-weight: 500;
+      color: var(--primary-color);
+      font-weight: 600;
+      font-size: var(--font-size-base);
+      margin-top: 8px;
+      letter-spacing: var(--letter-spacing-tight);
     }
 
     .button-group {
@@ -43,44 +106,71 @@
 
     button {
       flex: 1;
-      background: #007a5a;
+      background: var(--success-color);
       color: white;
       border: none;
-      padding: 8px 16px;
-      border-radius: 4px;
+      padding: 10px 16px;
+      border-radius: var(--border-radius);
       cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
+      font-family: var(--font-primary);
+      font-size: var(--font-size-base);
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-tight);
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
     }
 
     button.stop {
-      background: #e01e5a;
+      background: var(--danger-color);
     }
 
     button.stop:hover:not(:disabled) {
       background: #c91c51;
+      box-shadow: var(--shadow-md);
     }
 
     button:disabled {
-      background: #ddd;
+      background: #e8e8e8;
       cursor: not-allowed;
+      box-shadow: none;
     }
 
     button:hover:not(:disabled) {
-      background: #006c4f;
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
     }
 
     .stats-panel {
-      background: #f8f8f8;
-      padding: 12px;
-      border-radius: 6px;
+      background: var(--bg-secondary);
+      padding: 16px;
+      border-radius: var(--border-radius);
       font-size: 14px;
       max-height: 300px;
       overflow-y: auto;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+    }
+
+    .stats-panel:hover {
+      box-shadow: var(--shadow-md);
     }
 
     .org-section {
       margin-bottom: 16px;
+      background: var(--bg-primary);
+      border-radius: var(--border-radius);
+      padding: 12px;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+    }
+
+    .org-section:hover {
+      box-shadow: var(--shadow-md);
     }
 
     .org-header {
@@ -90,63 +180,308 @@
       margin-bottom: 8px;
       cursor: pointer;
       user-select: none;
+      padding: 4px;
+      border-radius: var(--border-radius);
+      transition: var(--transition);
+    }
+
+    .org-header:hover {
+      background: var(--bg-secondary);
     }
 
     .org-name {
       font-weight: 600;
-      color: #1264a3;
+      color: var(--primary-color);
+      font-size: var(--font-size-base);
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-tight);
     }
 
     .org-count {
-      color: #616061;
-      font-size: 12px;
+      color: var(--text-secondary);
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      letter-spacing: var(--letter-spacing-normal);
     }
 
     .channel-section {
-      margin-left: 16px;
-      margin-bottom: 8px;
+      margin-left: 24px;
+      margin-top: 8px;
       display: none;
     }
 
     .channel-section.expanded {
       display: block;
+      animation: slideDown 0.2s ease-out;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .channel-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 4px 0;
-      color: #616061;
+      padding: 8px;
+      color: var(--text-secondary);
+      border-radius: var(--border-radius);
+      transition: var(--transition);
+    }
+
+    .channel-row:hover {
+      background: var(--bg-secondary);
     }
 
     .channel-name {
       font-weight: 500;
+      font-size: var(--font-size-base);
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-normal);
+    }
+
+    .channel-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .channel-count {
-      font-size: 12px;
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      letter-spacing: var(--letter-spacing-normal);
+    }
+
+    .delete-button {
+      background: var(--danger-color);
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: var(--border-radius);
+      cursor: pointer;
+      font-family: var(--font-primary);
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-tight);
+      transition: var(--transition);
+    }
+
+    .delete-button:hover:not(:disabled) {
+      background: #c91c51;
+      transform: translateY(-1px);
+    }
+
+    .delete-button:active:not(:disabled) {
+      transform: translateY(0);
     }
 
     .expand-icon {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      text-align: center;
-      line-height: 16px;
-      font-size: 12px;
-      color: #616061;
-      transition: transform 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      font-size: var(--font-size-base);
+      font-weight: 400;
+      color: var(--text-secondary);
+      transition: var(--transition);
+      background: var(--bg-secondary);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-feature-settings: "kern" 0, "liga" 0, "calt" 1, "pnum" 0, "tnum" 1;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: auto;
+      -moz-osx-font-smoothing: auto;
     }
 
     .expanded .expand-icon {
       transform: rotate(90deg);
+      background: var(--primary-color);
+      color: white;
     }
 
     .divider {
       height: 1px;
       background: #e8e8e8;
-      margin: 8px 0;
+      margin: 12px 0;
+    }
+
+    .confirm-dialog {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .confirm-dialog.visible {
+      display: flex;
+      opacity: 1;
+    }
+
+    .confirm-dialog-content {
+      background: var(--bg-primary);
+      padding: 20px;
+      border-radius: var(--border-radius);
+      width: 320px;
+      box-shadow: var(--shadow-md);
+      transform: scale(0.9);
+      transition: transform 0.2s ease;
+    }
+
+    .confirm-dialog.visible .confirm-dialog-content {
+      transform: scale(1);
+    }
+
+    .confirm-dialog-message {
+      margin-bottom: 20px;
+      color: var(--text-primary);
+      font-size: var(--font-size-base);
+      line-height: var(--line-height-normal);
+      letter-spacing: var(--letter-spacing-normal);
+    }
+
+    .confirm-dialog-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .confirm-dialog-button {
+      padding: 8px 16px;
+      border-radius: var(--border-radius);
+      font-family: var(--font-primary);
+      font-size: var(--font-size-base);
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-tight);
+      cursor: pointer;
+      border: none;
+      transition: var(--transition);
+    }
+
+    .confirm-dialog-cancel {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    .confirm-dialog-confirm {
+      background: var(--danger-color);
+      color: white;
+    }
+
+    .notification {
+      display: none;
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      border-radius: var(--border-radius);
+      font-family: var(--font-primary);
+      font-size: var(--font-size-base);
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-tight);
+      color: white;
+      background: var(--success-color);
+      box-shadow: var(--shadow-md);
+      z-index: 1000;
+      opacity: 0;
+      transition: var(--transition);
+    }
+
+    .notification.visible {
+      display: block;
+      opacity: 1;
+      animation: slideUp 0.3s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translate(-50%, 16px);
+      }
+      to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a1a1a1;
+    }
+
+    /* Ensure numeric values use tabular figures */
+    .message-count,
+    .org-count,
+    .channel-count {
+      font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "pnum" 0, "tnum" 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .channel-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-primary);
+      text-decoration: none;
+      padding: 4px;
+      border-radius: 4px;
+      transition: var(--transition);
+    }
+
+    .channel-link:hover {
+      background: var(--bg-secondary);
+      color: var(--primary-color);
+    }
+
+    .channel-link-icon {
+      font-size: var(--font-size-sm);
+      opacity: 0.6;
+      transition: var(--transition);
+    }
+
+    .channel-link:hover .channel-link-icon {
+      opacity: 1;
+      transform: translateX(1px) translateY(-1px);
+    }
+
+    .channel-name {
+      font-weight: 500;
+      font-size: var(--font-size-base);
+      letter-spacing: var(--letter-spacing-tight);
+      line-height: var(--line-height-normal);
     }
   </style>
 </head>
@@ -167,6 +502,19 @@
     </div>
     <button id="downloadButton" disabled>Download Messages</button>
   </div>
+
+  <div id="confirmDialog" class="confirm-dialog">
+    <div class="confirm-dialog-content">
+      <div id="confirmMessage" class="confirm-dialog-message"></div>
+      <div class="confirm-dialog-buttons">
+        <button id="confirmCancel" class="confirm-dialog-button confirm-dialog-cancel">Cancel</button>
+        <button id="confirmOk" class="confirm-dialog-button confirm-dialog-confirm">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notification" class="notification"></div>
+
   <script src="popup.js"></script>
 </body>
 </html>
