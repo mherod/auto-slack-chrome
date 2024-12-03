@@ -14,6 +14,7 @@ export class MessageExtractor {
       '.p-workspace__primary_view_contents',
       '.c-virtual_list__scroll_container',
       '.p-workspace__primary_view_body',
+      '.c-search__results_container',
     ];
 
     for (const selector of selectors) {
@@ -25,6 +26,22 @@ export class MessageExtractor {
   }
 
   public extractChannelInfo(): ChannelInfo | null {
+    // First try to get channel info from search result
+    const searchChannelName = document.querySelector('.c-channel_entity__name');
+    if (searchChannelName !== null) {
+      const channel = searchChannelName.textContent?.trim() ?? '';
+      // Get organization from URL since it's not in the search view
+      const orgMatch = window.location.hostname.match(/^([^.]+)\.slack\.com$/);
+      const organization = orgMatch?.at(1)?.trim() ?? '';
+
+      if (channel && organization) {
+        return {
+          channel,
+          organization,
+        };
+      }
+    }
+
     // Try to match channel title format
     const channelMatch = document.title.match(/^(.+?) \(Channel\) - (.+?) - Slack$/);
     if (channelMatch?.at(1) !== undefined && channelMatch?.at(2) !== undefined) {
@@ -53,6 +70,46 @@ export class MessageExtractor {
   }
 
   public extractMessageSender(listItem: Element): SenderInfo {
+    // Try search result format first
+    const searchSenderButton = listItem.querySelector('[data-message-sender]');
+    const searchAvatarImg = listItem.querySelector('.c-search_message__avatar img');
+    const searchCustomStatusEmoji = listItem.querySelector('.c-custom_status .c-emoji img');
+
+    if (searchSenderButton !== null) {
+      const senderText = searchSenderButton.textContent;
+      const sender = senderText !== null ? senderText.trim() : null;
+      const senderId = searchSenderButton.getAttribute('data-message-sender');
+      const avatarUrl = searchAvatarImg?.getAttribute('src') ?? null;
+      const customStatus =
+        searchCustomStatusEmoji !== null
+          ? {
+              emoji: ((): string | null => {
+                const alt = searchCustomStatusEmoji.getAttribute('alt');
+                return alt !== null ? alt.replace(/:/g, '') : null;
+              })(),
+              emojiUrl: searchCustomStatusEmoji?.getAttribute('src') ?? null,
+            }
+          : null;
+
+      if (sender !== null && senderId !== null) {
+        this.lastKnownSender = {
+          sender,
+          senderId,
+          avatarUrl,
+          customStatus,
+        };
+      }
+
+      return {
+        sender,
+        senderId,
+        avatarUrl,
+        customStatus,
+        isInferred: false,
+      };
+    }
+
+    // Try regular message format
     const senderButton = listItem.querySelector('[data-qa="message_sender_name"]');
     const avatarImg = listItem.querySelector('.c-message_kit__avatar img');
     const customStatusEmoji = listItem.querySelector('.c-custom_status .c-emoji img');
@@ -92,10 +149,13 @@ export class MessageExtractor {
       };
     }
 
-    // If no direct sender found, use lastKnownSender if available
+    // If no direct sender found, try to infer from lastKnownSender
     if (this.lastKnownSender !== null) {
       return {
-        ...this.lastKnownSender,
+        sender: this.lastKnownSender.sender,
+        senderId: this.lastKnownSender.senderId,
+        avatarUrl: this.lastKnownSender.avatarUrl,
+        customStatus: this.lastKnownSender.customStatus,
         isInferred: true,
       };
     }
@@ -146,7 +206,8 @@ export class MessageExtractor {
 
   public isValidMessageId(id: string): boolean {
     // Message IDs from actual messages typically follow the pattern: timestamp.number
-    return /^\d+\.\d+$/.test(id);
+    // Search results use a UUID format
+    return /^\d+\.\d+$/.test(id) || /^messages_[0-9a-f-]+$/.test(id);
   }
 
   public extractMessageTimestamp(timestampElement: Element): {
@@ -156,31 +217,41 @@ export class MessageExtractor {
     let timestamp: string | null = null;
     let permalink: string | null = null;
 
-    const unixTimestamp = timestampElement.getAttribute('data-ts');
-    if (unixTimestamp !== null) {
-      const timestampMs = parseFloat(unixTimestamp) * 1000;
+    // Try search result format first
+    const searchTimestamp = timestampElement.getAttribute('data-ts');
+    if (searchTimestamp !== null) {
+      const timestampMs = parseFloat(searchTimestamp) * 1000;
       timestamp = new Date(timestampMs).toISOString();
+      permalink = timestampElement.getAttribute('href');
     } else {
-      const ariaLabel = timestampElement.getAttribute('aria-label');
-      if (ariaLabel !== null) {
-        const dateMatch = ariaLabel.match(
-          /(\d{1,2})\s+(\w+)(?:\s+at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?/,
-        );
-        if (dateMatch?.at(1) !== undefined && dateMatch?.at(2) !== undefined) {
-          const [_, day, month, hours, minutes, seconds = '0'] = dateMatch;
-          const year = new Date().getFullYear();
-          const date = parse(
-            `${day} ${month} ${year} ${hours}:${minutes}:${seconds}`,
-            'd MMM yyyy H:mm:ss',
-            new Date(),
+      // Try regular message format
+      const unixTimestamp = timestampElement.getAttribute('data-ts');
+      if (unixTimestamp !== null) {
+        const timestampMs = parseFloat(unixTimestamp) * 1000;
+        timestamp = new Date(timestampMs).toISOString();
+      } else {
+        const ariaLabel = timestampElement.getAttribute('aria-label');
+        if (ariaLabel !== null) {
+          const dateMatch = ariaLabel.match(
+            /(\d{1,2})\s+(\w+)(?:\s+at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?/,
           );
-          timestamp = date.toISOString();
+          if (dateMatch?.at(1) !== undefined && dateMatch?.at(2) !== undefined) {
+            const [_, day, month, hours, minutes, seconds = '0'] = dateMatch;
+            const year = new Date().getFullYear();
+            const date = parse(
+              `${day} ${month} ${year} ${hours}:${minutes}:${seconds}`,
+              'd MMM yyyy H:mm:ss',
+              new Date(),
+            );
+            timestamp = date.toISOString();
+          }
         }
       }
+
+      // Get permalink
+      permalink = timestampElement.getAttribute('href');
     }
 
-    // Get permalink
-    permalink = timestampElement.getAttribute('href');
     if (permalink !== null && !permalink.startsWith('http')) {
       permalink = `https://slack.com${permalink}`;
     }
