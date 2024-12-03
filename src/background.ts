@@ -83,78 +83,114 @@ const broadcastStateUpdate = (tabId: number): void => {
     state: tabState.state,
   };
 
-  void chrome.runtime.sendMessage(message);
+  void chrome.runtime.sendMessage(message).catch(() => {
+    // Ignore chrome.runtime errors when context is invalidated
+  });
 };
 
 // Handle incoming messages
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse): boolean => {
-  if (message.type === 'heartbeat') {
-    const { timestamp, status } = message;
-    const tabId = _sender.tab?.id;
-    if (tabId === undefined) return false;
+  try {
+    if (message.type === 'heartbeat') {
+      const { timestamp, status } = message;
+      const tabId = _sender.tab?.id;
+      if (tabId === undefined) return false;
 
-    let tabState = tabStates.get(tabId);
-    if (tabState === undefined) {
-      tabState = {
-        lastHeartbeat: timestamp,
-        state: {
-          isExtracting: status.isExtracting,
-          currentChannel: status.channelInfo,
-          extractedMessages: {},
-        },
-      };
-      tabStates.set(tabId, tabState);
-    } else {
-      tabState.lastHeartbeat = timestamp;
-      if (tabState.state !== null) {
-        tabState.state.isExtracting = status.isExtracting;
-        tabState.state.currentChannel = status.channelInfo;
+      let tabState = tabStates.get(tabId);
+      if (tabState === undefined) {
+        tabState = {
+          lastHeartbeat: timestamp,
+          state: {
+            isExtracting: status.isExtracting,
+            currentChannel: status.channelInfo,
+            extractedMessages: {},
+          },
+        };
+        tabStates.set(tabId, tabState);
+      } else {
+        tabState.lastHeartbeat = timestamp;
+        if (tabState.state !== null) {
+          tabState.state.isExtracting = status.isExtracting;
+          tabState.state.currentChannel = status.channelInfo;
+        }
       }
-    }
 
-    broadcastStateUpdate(tabId);
-    sendResponse({ success: true });
-  } else if (message.type === 'sync') {
-    const { timestamp, data } = message;
-    const tabId = _sender.tab?.id;
-    if (tabId === undefined) return false;
+      broadcastStateUpdate(tabId);
+      sendResponse({ success: true });
+    } else if (message.type === 'sync') {
+      const { timestamp, data } = message;
+      const tabId = _sender.tab?.id;
+      if (tabId === undefined) return false;
 
-    let tabState = tabStates.get(tabId);
-    if (tabState === undefined) {
-      tabState = {
-        lastHeartbeat: timestamp,
-        state: {
-          isExtracting: false,
-          currentChannel: data.currentChannel,
-          extractedMessages: data.extractedMessages,
-        },
-      };
-      tabStates.set(tabId, tabState);
-    } else {
-      tabState.lastHeartbeat = timestamp;
-      if (tabState.state !== null) {
-        tabState.state.currentChannel = data.currentChannel;
-        tabState.state.extractedMessages = data.extractedMessages;
+      let tabState = tabStates.get(tabId);
+      if (tabState === undefined) {
+        tabState = {
+          lastHeartbeat: timestamp,
+          state: {
+            isExtracting: false,
+            currentChannel: data.currentChannel,
+            extractedMessages: data.extractedMessages,
+          },
+        };
+        tabStates.set(tabId, tabState);
+      } else {
+        tabState.lastHeartbeat = timestamp;
+        if (tabState.state !== null) {
+          tabState.state.currentChannel = data.currentChannel;
+          tabState.state.extractedMessages = data.extractedMessages;
+        }
       }
-    }
 
-    broadcastStateUpdate(tabId);
-    sendResponse({ success: true });
-  } else if (message.type === 'popup_status') {
-    const { tabId } = message;
-    const tabState = tabStates.get(tabId);
-    sendResponse({ state: tabState?.state ?? null });
+      broadcastStateUpdate(tabId);
+      sendResponse({ success: true });
+    } else if (message.type === 'popup_status') {
+      const { tabId } = message;
+      const tabState = tabStates.get(tabId);
+      sendResponse({ state: tabState?.state ?? null });
+    }
+  } catch (error) {
+    console.error('Error handling message:', error);
+    sendResponse({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 
   return true;
 });
 
 // Set up periodic cleanup
-window.setInterval(cleanupTabs, CLEANUP_INTERVAL);
+let cleanupInterval: number | null = null;
+let syncInterval: number | null = null;
 
-// Set up periodic sync broadcast
-window.setInterval(() => {
-  Array.from(tabStates.keys()).forEach((tabId) => {
-    broadcastStateUpdate(tabId);
-  });
-}, SYNC_INTERVAL);
+const startIntervals = (): void => {
+  if (cleanupInterval === null) {
+    cleanupInterval = window.setInterval(cleanupTabs, CLEANUP_INTERVAL);
+  }
+  if (syncInterval === null) {
+    syncInterval = window.setInterval(() => {
+      Array.from(tabStates.keys()).forEach((tabId) => {
+        broadcastStateUpdate(tabId);
+      });
+    }, SYNC_INTERVAL);
+  }
+};
+
+const stopIntervals = (): void => {
+  if (cleanupInterval !== null) {
+    window.clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+  if (syncInterval !== null) {
+    window.clearInterval(syncInterval);
+    syncInterval = null;
+  }
+};
+
+// Start intervals
+startIntervals();
+
+// Handle extension reload/update
+chrome.runtime.onSuspend.addListener(() => {
+  stopIntervals();
+});

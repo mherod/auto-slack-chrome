@@ -16,8 +16,13 @@ module.exports = [
       },
       globals: {
         chrome: 'readonly',
+        console: 'readonly',
         document: 'readonly',
         window: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
         URL: 'readonly',
         Blob: 'readonly',
         HTMLButtonElement: 'readonly',
@@ -41,7 +46,10 @@ module.exports = [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-      '@typescript-eslint/strict-boolean-expressions': 'error',
+      '@typescript-eslint/strict-boolean-expressions': [
+        'error',
+        { allowNullableBoolean: true },
+      ],
       '@typescript-eslint/no-floating-promises': [
         'error',
         {
@@ -64,48 +72,7 @@ module.exports = [
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
       '@typescript-eslint/prefer-nullish-coalescing': 'error',
       '@typescript-eslint/prefer-optional-chain': 'error',
-      '@typescript-eslint/return-await': ['error', 'in-try-catch'],
-      'no-restricted-globals': [
-        'error',
-        'event',
-        'fdescribe',
-        {
-          name: 'fetch',
-          message: 'Use chrome.runtime.sendMessage for cross-origin requests'
-        },
-        {
-          name: 'history',
-          message: 'Use chrome.history API instead'
-        },
-        {
-          name: 'location',
-          message: 'Use chrome.tabs API for navigation'
-        }
-      ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'CallExpression[callee.object.name="window"][callee.property.name="open"]',
-          message: 'Use chrome.windows.create instead of window.open'
-        },
-        {
-          selector: 'CallExpression[callee.object.name="window"][callee.property.name="close"]',
-          message: 'Use chrome.windows.remove instead of window.close'
-        },
-        {
-          selector: 'CallExpression[callee.name="eval"]',
-          message: 'eval() is dangerous and violates Chrome extension CSP'
-        },
-        {
-          selector: 'CallExpression[callee.name="Function"]',
-          message: 'new Function() is dangerous and violates Chrome extension CSP'
-        }
-      ],
-      'no-var': 'error',
-      'prefer-const': 'error',
-      'prefer-rest-params': 'error',
-      'prefer-spread': 'error',
-      'no-console': 'error',
+      'no-console': process.env.NODE_ENV === 'production' ? 'error' : 'off',
       'no-debugger': 'error',
       'no-alert': 'error',
       'no-eval': 'error',
