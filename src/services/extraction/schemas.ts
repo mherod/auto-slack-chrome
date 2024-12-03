@@ -14,7 +14,7 @@ export const SlackMessageSchema = z.object({
   customStatus: CustomStatusSchema.nullable(),
   avatarUrl: z.string().nullable(),
   messageId: z.string().nullable(),
-  isInferredSender: z.boolean(),
+  isInferredSender: z.boolean().default(false),
 });
 
 export const ChannelInfoSchema = z.object({
