@@ -52,6 +52,7 @@ const updateUI = (): void => {
   const startButton = document.getElementById('startButton') as HTMLButtonElement;
   const stopButton = document.getElementById('stopButton') as HTMLButtonElement;
   const downloadButton = document.getElementById('downloadButton') as HTMLButtonElement;
+  const goToSlackButton = document.getElementById('goToSlackButton') as HTMLButtonElement;
 
   if (statusElement === null || channelInfoElement === null || messageCountElement === null) {
     return;
@@ -62,14 +63,32 @@ const updateUI = (): void => {
     startButton.disabled = true;
     stopButton.disabled = true;
     downloadButton.disabled = true;
+    goToSlackButton.style.display = 'block';
+    startButton.style.display = 'none';
+    stopButton.style.display = 'none';
+    channelInfoElement.textContent = '';
+    messageCountElement.textContent = '';
+    if (messageStatsElement) {
+      messageStatsElement.innerHTML = '';
+    }
     return;
   }
+
+  // Show extraction buttons and hide Slack button when connected
+  goToSlackButton.style.display = 'none';
+  startButton.style.display = 'block';
+  stopButton.style.display = 'block';
 
   if (popupState.state === null) {
     statusElement.textContent = 'Connected to Slack';
     startButton.disabled = false;
     stopButton.disabled = true;
     downloadButton.disabled = true;
+    channelInfoElement.textContent = '';
+    messageCountElement.textContent = '';
+    if (messageStatsElement) {
+      messageStatsElement.innerHTML = '';
+    }
     return;
   }
 
@@ -79,11 +98,10 @@ const updateUI = (): void => {
     : 'Connected to Slack';
 
   // Update channel info
-  if (popupState.state.currentChannel !== null) {
-    channelInfoElement.textContent = `Current channel: ${popupState.state.currentChannel.channel} (${popupState.state.currentChannel.organization})`;
-  } else {
-    channelInfoElement.textContent = 'No channel selected';
-  }
+  channelInfoElement.textContent =
+    popupState.state.currentChannel !== null
+      ? `Current channel: ${popupState.state.currentChannel.channel} (${popupState.state.currentChannel.organization})`
+      : 'No channel selected';
 
   // Update buttons
   startButton.disabled = popupState.state.isExtracting;
@@ -296,6 +314,11 @@ const initialize = async (): Promise<void> => {
   const startButton = document.getElementById('startButton');
   const stopButton = document.getElementById('stopButton');
   const downloadButton = document.getElementById('downloadButton');
+  const goToSlackButton = document.getElementById('goToSlackButton');
+
+  goToSlackButton?.addEventListener('click', () => {
+    void chrome.tabs.create({ url: 'https://app.slack.com/' });
+  });
 
   startButton?.addEventListener('click', () => {
     const message: ExtractionControlMessage = { type: 'START_EXTRACTION' };
