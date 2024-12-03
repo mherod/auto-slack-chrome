@@ -194,4 +194,25 @@ module.exports = [
   {
     ignores: ['dist/**', 'node_modules/**'],
   },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'commonjs',
+      globals: {
+        console: true,
+        __dirname: true,
+        process: true,
+        require: true,
+        module: true,
+        Buffer: true,
+      },
+    },
+  },
+  {
+    files: ['webpack.config.cjs'],
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
 ];
