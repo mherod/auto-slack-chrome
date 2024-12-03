@@ -230,11 +230,81 @@ const updateMessageStats = (
           (channel) => `
           <div class="channel-row">
             <span class="channel-name">${channel.name}</span>
-            <span class="channel-count">${channel.messageCount} messages</span>
+            <div class="channel-actions">
+              <span class="channel-count">${channel.messageCount} messages</span>
+              <button class="delete-button" data-org="${org.name}" data-channel="${channel.name}">Delete</button>
+            </div>
           </div>
         `,
         )
         .join('');
+
+      // Add click handlers for delete buttons
+      channelSection.querySelectorAll('.delete-button').forEach((button) => {
+        button.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const orgName = (button as HTMLButtonElement).getAttribute('data-org');
+          const channelName = (button as HTMLButtonElement).getAttribute('data-channel');
+
+          if (orgName && channelName) {
+            const confirmed = await showConfirmDialog(
+              `Are you sure you want to delete all messages from ${channelName} in ${orgName}?`,
+            );
+
+            if (confirmed) {
+              const deleteButton = button as HTMLButtonElement;
+              deleteButton.disabled = true;
+              deleteButton.classList.add('loading');
+
+              try {
+                // Send delete request and wait for response
+                await chrome.runtime.sendMessage({
+                  type: 'DELETE_CHANNEL_MESSAGES',
+                  organization: orgName,
+                  channel: channelName,
+                });
+
+                // Wait for state update message (background will send this)
+                await new Promise<void>((resolve) => {
+                  const handleStateUpdate = (message: { type: string }): void => {
+                    if (message.type === 'state_update') {
+                      chrome.runtime.onMessage.removeListener(handleStateUpdate);
+                      resolve();
+                    }
+                  };
+                  chrome.runtime.onMessage.addListener(handleStateUpdate);
+                });
+
+                showNotification(`Successfully deleted messages from ${channelName}`);
+              } catch (error) {
+                const errorDetails = {
+                  action: 'Delete Channel Messages',
+                  organization: orgName,
+                  channel: channelName,
+                  timestamp: new Date().toISOString(),
+                  error:
+                    error instanceof Error
+                      ? {
+                          name: error.name,
+                          message: error.message,
+                          stack: error.stack,
+                        }
+                      : error,
+                };
+
+                console.error('Failed to delete messages:', errorDetails);
+                showNotification(
+                  `Failed to delete messages from ${channelName}. Check console for details.`,
+                  5000,
+                );
+              } finally {
+                deleteButton.disabled = false;
+                deleteButton.classList.remove('loading');
+              }
+            }
+          }
+        });
+      });
     }
 
     // Add divider if not last
@@ -295,6 +365,54 @@ const startSync = (): void => {
   sendStatusMessage();
   window.setInterval(sendStatusMessage, POPUP_SYNC_INTERVAL);
 };
+
+function showNotification(message: string, duration: number = 3000): void {
+  const notification = document.getElementById('notification');
+  if (!notification) return;
+
+  notification.textContent = message;
+  notification.classList.add('visible');
+
+  setTimeout(() => {
+    notification.classList.remove('visible');
+  }, duration);
+}
+
+function showConfirmDialog(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById('confirmDialog');
+    const messageEl = document.getElementById('confirmMessage');
+    const confirmButton = document.getElementById('confirmOk');
+    const cancelButton = document.getElementById('confirmCancel');
+
+    if (!dialog || !messageEl || !confirmButton || !cancelButton) {
+      resolve(false);
+      return;
+    }
+
+    messageEl.textContent = message;
+    dialog.classList.add('visible');
+
+    const handleConfirm = (): void => {
+      cleanup();
+      resolve(true);
+    };
+
+    const handleCancel = (): void => {
+      cleanup();
+      resolve(false);
+    };
+
+    const cleanup = (): void => {
+      dialog.classList.remove('visible');
+      confirmButton.removeEventListener('click', handleConfirm);
+      cancelButton.removeEventListener('click', handleCancel);
+    };
+
+    confirmButton.addEventListener('click', handleConfirm);
+    cancelButton.addEventListener('click', handleCancel);
+  });
+}
 
 // Initialize popup
 const initialize = async (): Promise<void> => {
@@ -358,3 +476,35 @@ const initialize = async (): Promise<void> => {
 document.addEventListener('DOMContentLoaded', () => {
   void initialize();
 });
+
+// Add styles for the spinner
+const style = document.createElement('style');
+style.textContent = `
+  .delete-button {
+    position: relative;
+  }
+
+  .delete-button.loading {
+    color: transparent;
+  }
+
+  .delete-button.loading::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: 50%;
+    left: 50%;
+    margin: -8px 0 0 -8px;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    border-right-color: transparent;
+    animation: spin 0.75s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+`;
+document.head.appendChild(style);

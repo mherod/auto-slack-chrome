@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import type { MessagesByOrganization } from './services/extraction';
+import { StorageService } from './services/extraction';
 
 interface BackgroundState {
   isExtracting: boolean;
@@ -53,7 +54,15 @@ interface StateUpdateMessage {
   state: BackgroundState;
 }
 
-type IncomingMessage = HeartbeatMessage | SyncMessage | PopupStatusMessage;
+type IncomingMessage =
+  | HeartbeatMessage
+  | SyncMessage
+  | PopupStatusMessage
+  | {
+      type: 'DELETE_CHANNEL_MESSAGES';
+      organization: string;
+      channel: string;
+    };
 type OutgoingMessage = StateUpdateMessage;
 
 const HEARTBEAT_TIMEOUT = 10000; // 10 seconds
@@ -61,6 +70,9 @@ const CLEANUP_INTERVAL = 10000; // 10 seconds
 const SYNC_INTERVAL = 10000; // 10 seconds
 
 const tabStates = new Map<number, TabState>();
+
+// Initialize services
+const storageService = new StorageService();
 
 // Clean up disconnected tabs
 const cleanupTabs = (): void => {
@@ -210,4 +222,55 @@ chrome.runtime.onInstalled.addListener(() => {
 // Handle extension suspend
 chrome.runtime.onSuspend.addListener(() => {
   stopIntervals();
+});
+
+// Handle messages from popup and content script
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'DELETE_CHANNEL_MESSAGES') {
+    void (async (): Promise<void> => {
+      try {
+        await storageService.deleteChannelMessages(message.organization, message.channel);
+
+        // Get updated state
+        const state = await storageService.loadState();
+
+        // Broadcast state update to all tabs
+        const tabs = await chrome.tabs.query({});
+        const updatePromises = tabs.map(async (tab) => {
+          if (tab.id) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, {
+                type: 'state_update',
+                timestamp: Date.now(),
+                state,
+              });
+            } catch {
+              // Ignore errors for tabs that don't have listeners
+              console.debug('Could not send state update to tab:', tab.id);
+            }
+          }
+        });
+
+        // Wait for all tab updates
+        await Promise.all(updatePromises);
+
+        // Send state update to popup
+        await chrome.runtime.sendMessage({
+          type: 'state_update',
+          timestamp: Date.now(),
+          state,
+        });
+
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('Error handling delete:', error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    })();
+    return true; // Will respond asynchronously
+  }
+  return false;
 });
