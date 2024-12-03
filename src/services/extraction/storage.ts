@@ -14,16 +14,14 @@ export class StorageService {
   }
 
   public async saveState(state: ExtensionState): Promise<void> {
-    // Always merge with existing state
+    // Always merge with existing state using lodash merge
     const currentState = await this.loadState();
-    const mergedState: ExtensionState = {
-      ...currentState,
-      ...state,
+    const mergedState = merge({}, currentState, state, {
       extractedMessages: await this.mergeAndSaveMessages(
         currentState.extractedMessages,
         state.extractedMessages,
       ),
-    };
+    });
     await chrome.storage.local.set({ extensionState: mergedState });
   }
 
@@ -35,7 +33,10 @@ export class StorageService {
   }
 
   public async saveAllMessages(messages: MessagesByOrganization): Promise<void> {
-    await chrome.storage.local.set({ allMessages: messages });
+    // Merge with existing messages before saving
+    const currentMessages = await this.loadAllMessages();
+    const mergedMessages = merge({}, currentMessages, messages);
+    await chrome.storage.local.set({ allMessages: mergedMessages });
   }
 
   public async mergeAndSaveMessages(
