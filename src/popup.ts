@@ -36,7 +36,7 @@ type PopupMessage = StatusMessage | StateUpdateMessage;
 
 const POPUP_SYNC_INTERVAL = 1000; // 1 second for popup since it's temporary
 
-let popupState: PopupState = {
+const popupState: PopupState = {
   isConnected: false,
   activeTabId: null,
   lastSync: Date.now(),
@@ -62,7 +62,7 @@ const updateUI = (): void => {
     return;
   }
 
-  if (!popupState.state) {
+  if (popupState.state === null) {
     statusText.textContent = 'No active extraction';
     startButton.disabled = false;
     stopButton.disabled = true;
@@ -82,7 +82,7 @@ const updateUI = (): void => {
   statusText.textContent = isExtracting ? 'Extracting messages...' : 'Ready';
 
   // Update channel info
-  if (currentChannel) {
+  if (currentChannel !== null) {
     channelInfo.textContent = `Channel: ${currentChannel.channel} (${currentChannel.organization})`;
   } else {
     channelInfo.textContent = 'No channel selected';
@@ -102,7 +102,7 @@ const updateUI = (): void => {
 
 // Request current state from background script
 const requestState = async (): Promise<void> => {
-  if (!popupState.activeTabId) return;
+  if (popupState.activeTabId === null) return;
 
   void chrome.runtime.sendMessage(
     {
@@ -111,13 +111,13 @@ const requestState = async (): Promise<void> => {
       tabId: popupState.activeTabId,
     },
     (response) => {
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime.lastError !== undefined) {
         popupState.isConnected = false;
         updateUI();
         return;
       }
 
-      if (response?.state) {
+      if (response?.state !== undefined) {
         popupState.isConnected = true;
         popupState.state = response.state;
         popupState.lastSync = Date.now();
@@ -131,22 +131,22 @@ const requestState = async (): Promise<void> => {
 const initializePopup = async (): Promise<void> => {
   // Get current tab
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
+  if (tab?.id !== undefined) {
     popupState.activeTabId = tab.id;
   }
 
   // Set up start button
   const startButton = document.getElementById('startButton');
-  if (startButton) {
+  if (startButton !== null) {
     startButton.addEventListener('click', () => {
-      if (!popupState.activeTabId) return;
+      if (popupState.activeTabId === null) return;
 
       void chrome.tabs.sendMessage(popupState.activeTabId, {
         type: 'START_EXTRACTION',
       } as ExtractionControlMessage);
 
       // Update UI immediately for responsiveness
-      if (popupState.state) {
+      if (popupState.state !== null) {
         popupState.state.isExtracting = true;
         updateUI();
       }
@@ -155,16 +155,16 @@ const initializePopup = async (): Promise<void> => {
 
   // Set up stop button
   const stopButton = document.getElementById('stopButton');
-  if (stopButton) {
+  if (stopButton !== null) {
     stopButton.addEventListener('click', () => {
-      if (!popupState.activeTabId) return;
+      if (popupState.activeTabId === null) return;
 
       void chrome.tabs.sendMessage(popupState.activeTabId, {
         type: 'STOP_EXTRACTION',
       } as ExtractionControlMessage);
 
       // Update UI immediately for responsiveness
-      if (popupState.state) {
+      if (popupState.state !== null) {
         popupState.state.isExtracting = false;
         updateUI();
       }
@@ -173,9 +173,9 @@ const initializePopup = async (): Promise<void> => {
 
   // Set up download button
   const downloadButton = document.getElementById('downloadButton');
-  if (downloadButton) {
+  if (downloadButton !== null) {
     downloadButton.addEventListener('click', () => {
-      if (!popupState.state?.extractedMessages) return;
+      if (popupState.state?.extractedMessages === undefined) return;
 
       const blob = new Blob([JSON.stringify(popupState.state.extractedMessages, null, 2)], {
         type: 'application/json',
@@ -201,7 +201,7 @@ const initializePopup = async (): Promise<void> => {
 
 // Listen for state updates from background script
 chrome.runtime.onMessage.addListener((message: PopupMessage, _sender, _sendResponse) => {
-  if (message.type === 'state_update' && popupState.activeTabId) {
+  if (message.type === 'state_update' && popupState.activeTabId !== null) {
     popupState.isConnected = true;
     popupState.state = message.state;
     popupState.lastSync = message.timestamp;

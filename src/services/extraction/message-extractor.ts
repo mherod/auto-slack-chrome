@@ -1,9 +1,9 @@
 import { parse } from 'date-fns';
 import {
-  type SlackMessage,
   type ChannelInfo,
-  type SenderInfo,
   type LastKnownSender,
+  type SenderInfo,
+  type SlackMessage,
 } from './types';
 
 export class MessageExtractor {
@@ -18,7 +18,7 @@ export class MessageExtractor {
 
     for (const selector of selectors) {
       const container = document.querySelector(selector);
-      if (container) return container;
+      if (container !== null) return container;
     }
 
     return null;
@@ -27,7 +27,7 @@ export class MessageExtractor {
   public extractChannelInfo(): ChannelInfo | null {
     // Try to match channel title format
     const channelMatch = document.title.match(/^(.+?) \(Channel\) - (.+?) - Slack$/);
-    if (channelMatch) {
+    if (channelMatch?.at(1) !== undefined && channelMatch?.at(2) !== undefined) {
       const [_, channel, organization] = channelMatch;
       const cleanChannel = channel.replace(/^[!*]/, '').trim();
       const cleanOrg = organization.replace(/\s*-\s*\d+\s*(new\s*items?)?$/, '').trim();
@@ -39,7 +39,7 @@ export class MessageExtractor {
 
     // Try to match DM title format
     const dmMatch = document.title.match(/^(.+?) \(DM\) - (.+?) - Slack$/);
-    if (dmMatch) {
+    if (dmMatch?.at(1) !== undefined && dmMatch?.at(2) !== undefined) {
       const [_, user, organization] = dmMatch;
       const cleanUser = user.replace(/^[!*]/, '').trim();
       const cleanOrg = organization.replace(/\s*-\s*\d+\s*(new\s*items?)?$/, '').trim();
@@ -58,18 +58,23 @@ export class MessageExtractor {
     const customStatusEmoji = listItem.querySelector('.c-custom_status .c-emoji img');
 
     // If we find a direct sender, use it and update lastKnownSender
-    if (senderButton) {
-      const sender = senderButton.textContent?.trim() || null;
-      const senderId = senderButton.getAttribute('data-message-sender') || null;
-      const avatarUrl = avatarImg?.getAttribute('src') || null;
-      const customStatus = customStatusEmoji
-        ? {
-            emoji: customStatusEmoji.getAttribute('alt')?.replace(/:/g, '') || null,
-            emojiUrl: customStatusEmoji.getAttribute('src') || null,
-          }
-        : null;
+    if (senderButton !== null) {
+      const senderText = senderButton.textContent;
+      const sender = senderText !== null ? senderText.trim() : null;
+      const senderId = senderButton.getAttribute('data-message-sender');
+      const avatarUrl = avatarImg?.getAttribute('src') ?? null;
+      const customStatus =
+        customStatusEmoji !== null
+          ? {
+              emoji: ((): string | null => {
+                const alt = customStatusEmoji.getAttribute('alt');
+                return alt !== null ? alt.replace(/:/g, '') : null;
+              })(),
+              emojiUrl: customStatusEmoji?.getAttribute('src') ?? null,
+            }
+          : null;
 
-      if (sender && senderId) {
+      if (sender !== null && senderId !== null) {
         this.lastKnownSender = {
           sender,
           senderId,
@@ -88,7 +93,7 @@ export class MessageExtractor {
     }
 
     // If no direct sender found, use lastKnownSender if available
-    if (this.lastKnownSender) {
+    if (this.lastKnownSender !== null) {
       return {
         ...this.lastKnownSender,
         isInferred: true,
@@ -107,7 +112,7 @@ export class MessageExtractor {
 
   public isValidMessage(message: SlackMessage): boolean {
     // Basic required fields
-    if (!message.messageId || !message.timestamp || !message.text) {
+    if (message.messageId === null || message.timestamp === null || message.text === '') {
       return false;
     }
 
@@ -122,17 +127,17 @@ export class MessageExtractor {
     }
 
     // Validate sender info
-    if (!message.isInferredSender && (!message.sender || !message.senderId)) {
+    if (!message.isInferredSender && (message.sender === null || message.senderId === null)) {
       return false;
     }
 
     // Validate permalink format
-    if (!message.permalink?.startsWith('https://')) {
+    if (message.permalink === null || message.permalink.startsWith('https://') === false) {
       return false;
     }
 
     // Validate message content
-    if (message.text.trim().length === 0) {
+    if (message.text.trim() === '') {
       return false;
     }
 
@@ -152,16 +157,16 @@ export class MessageExtractor {
     let permalink: string | null = null;
 
     const unixTimestamp = timestampElement.getAttribute('data-ts');
-    if (unixTimestamp) {
+    if (unixTimestamp !== null) {
       const timestampMs = parseFloat(unixTimestamp) * 1000;
       timestamp = new Date(timestampMs).toISOString();
     } else {
       const ariaLabel = timestampElement.getAttribute('aria-label');
-      if (ariaLabel) {
+      if (ariaLabel !== null) {
         const dateMatch = ariaLabel.match(
           /(\d{1,2})\s+(\w+)(?:\s+at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?/,
         );
-        if (dateMatch) {
+        if (dateMatch?.at(1) !== undefined && dateMatch?.at(2) !== undefined) {
           const [_, day, month, hours, minutes, seconds = '0'] = dateMatch;
           const year = new Date().getFullYear();
           const date = parse(
@@ -175,8 +180,8 @@ export class MessageExtractor {
     }
 
     // Get permalink
-    permalink = timestampElement.getAttribute('href') || null;
-    if (permalink && !permalink.startsWith('http')) {
+    permalink = timestampElement.getAttribute('href');
+    if (permalink !== null && !permalink.startsWith('http')) {
       permalink = `https://slack.com${permalink}`;
     }
 

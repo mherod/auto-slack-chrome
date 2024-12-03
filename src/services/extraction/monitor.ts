@@ -19,7 +19,7 @@ export class MonitorService {
   public async startMonitoring(): Promise<void> {
     // Load previous state
     const state = await this.storageService.loadState();
-    this.extractedMessages = state.extractedMessages || {};
+    this.extractedMessages = state.extractedMessages;
 
     // Initial channel info extraction
     this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
@@ -29,7 +29,7 @@ export class MonitorService {
 
     // Set up message observer
     const container = this.messageExtractor.getMessageContainer();
-    if (container) {
+    if (container !== null) {
       this.observer = new MutationObserver(() => {
         void this.extractMessages();
         this.onSync();
@@ -47,12 +47,12 @@ export class MonitorService {
 
   public async stopMonitoring(): Promise<void> {
     // Stop observers
-    if (this.observer) {
+    if (this.observer !== null) {
       this.observer.disconnect();
       this.observer = null;
     }
 
-    if (this.titleCheckInterval) {
+    if (this.titleCheckInterval !== null) {
       window.clearInterval(this.titleCheckInterval);
       this.titleCheckInterval = null;
     }
@@ -73,7 +73,7 @@ export class MonitorService {
       messageCount: Object.values(this.extractedMessages)
         .flatMap((org) => Object.values(org))
         .flatMap((channel) => Object.values(channel))
-        .flat().length,
+        .reduce((acc, messages) => acc + messages.length, 0),
       extractedMessages: this.extractedMessages,
     };
   }
@@ -82,7 +82,7 @@ export class MonitorService {
     const titleObserver = new MutationObserver(() => void this.checkChannelChange());
 
     const titleElement = document.querySelector('title');
-    if (titleElement) {
+    if (titleElement !== null) {
       titleObserver.observe(titleElement, {
         childList: true,
         characterData: true,
@@ -97,9 +97,10 @@ export class MonitorService {
   private async checkChannelChange(): Promise<void> {
     const newChannelInfo = this.messageExtractor.extractChannelInfo();
     if (
-      newChannelInfo &&
-      (newChannelInfo.channel !== this.currentChannelInfo?.channel ||
-        newChannelInfo.organization !== this.currentChannelInfo?.organization)
+      newChannelInfo !== null &&
+      (this.currentChannelInfo === null ||
+        newChannelInfo.channel !== this.currentChannelInfo.channel ||
+        newChannelInfo.organization !== this.currentChannelInfo.organization)
     ) {
       this.currentChannelInfo = newChannelInfo;
       await this.extractMessages();
@@ -110,71 +111,76 @@ export class MonitorService {
   private async extractMessages(): Promise<void> {
     // Update channel info
     this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
-    if (!this.currentChannelInfo) return;
+    if (this.currentChannelInfo === null) return;
 
     const messageElements = document.querySelectorAll('[data-qa="virtual-list-item"]');
-    if (!messageElements.length) return;
+    if (messageElements.length === 0) return;
 
     // Reset last known sender at the start of extraction
     this.messageExtractor.resetLastKnownSender();
 
     // Convert NodeList to Array for proper iteration
-    for (const listItem of Array.from(messageElements)) {
-      // Get message ID from the list item
-      const messageId = listItem.getAttribute('id');
+    await Promise.all(
+      Array.from(messageElements).map(async (listItem) => {
+        // Get message ID from the list item
+        const messageId = listItem.getAttribute('id');
 
-      // Skip invalid messages and UI elements
-      if (!messageId || !this.messageExtractor.isValidMessageId(messageId)) continue;
+        // Skip invalid messages and UI elements
+        if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
 
-      // Skip empty messages or UI elements without actual text content
-      const messageText = listItem.querySelector('[data-qa="message-text"]');
-      const text = messageText?.textContent?.trim() || '';
-      if (!text) continue;
+        // Skip empty messages or UI elements without actual text content
+        const messageText = listItem.querySelector('[data-qa="message-text"]');
+        const text = messageText?.textContent ?? '';
+        if (text.trim() === '') return;
 
-      // Extract sender information with follow-up message handling
-      const { sender, senderId, avatarUrl, customStatus, isInferred } =
-        this.messageExtractor.extractMessageSender(listItem);
+        // Extract sender information with follow-up message handling
+        const { sender, senderId, avatarUrl, customStatus, isInferred } =
+          this.messageExtractor.extractMessageSender(listItem);
 
-      // Get timestamp and permalink
-      const timestampElement = listItem.querySelector('.c-timestamp');
-      if (!timestampElement) continue;
+        // Get timestamp and permalink
+        const timestampElement = listItem.querySelector('.c-timestamp');
+        if (timestampElement === null) return;
 
-      const { timestamp, permalink } =
-        this.messageExtractor.extractMessageTimestamp(timestampElement);
+        const { timestamp, permalink } =
+          this.messageExtractor.extractMessageTimestamp(timestampElement);
 
-      // Skip messages without timestamps as they're likely UI elements
-      if (!timestamp) continue;
+        // Skip messages without timestamps as they're likely UI elements
+        if (timestamp === null) return;
 
-      const message: SlackMessage = {
-        messageId,
-        sender,
-        senderId,
-        timestamp,
-        text,
-        permalink,
-        customStatus,
-        avatarUrl,
-        isInferredSender: isInferred,
-      };
+        const message: SlackMessage = {
+          messageId,
+          sender,
+          senderId,
+          timestamp,
+          text,
+          permalink,
+          customStatus,
+          avatarUrl,
+          isInferredSender: isInferred,
+        };
 
-      // Only add valid messages to the hierarchy
-      if (this.messageExtractor.isValidMessage(message)) {
-        await this.updateMessageHierarchy(message);
-      }
-    }
+        // Only add valid messages to the hierarchy
+        if (this.messageExtractor.isValidMessage(message)) {
+          await this.updateMessageHierarchy(message);
+        }
+      }),
+    );
   }
 
   private async updateMessageHierarchy(message: SlackMessage): Promise<void> {
-    if (!this.currentChannelInfo) return;
+    if (this.currentChannelInfo === null || message.timestamp === null) return;
 
     const { organization, channel } = this.currentChannelInfo;
-    const messageDate = startOfDay(new Date(message.timestamp as string)).toISOString();
+    const messageDate = startOfDay(new Date(message.timestamp)).toISOString();
 
     // Initialize hierarchy if needed
-    if (!this.extractedMessages[organization]) this.extractedMessages[organization] = {};
-    if (!this.extractedMessages[organization][channel])
+    if (!(organization in this.extractedMessages)) {
+      this.extractedMessages[organization] = {};
+    }
+    if (!(channel in this.extractedMessages[organization])) {
       this.extractedMessages[organization][channel] = {};
-    if (!this.extractedMessages[organization][channel][messageDate]) {
+    }
+    if (!(messageDate in this.extractedMessages[organization][channel])) {
       this.extractedMessages[organization][channel][messageDate] = [];
     }
 
@@ -183,7 +189,7 @@ export class MonitorService {
 
     if (existingIndex >= 0) {
       // Update existing message if new info is available
-      if (!message.isInferredSender && message.sender && message.senderId) {
+      if (!message.isInferredSender && message.sender !== null && message.senderId !== null) {
         messages[existingIndex] = {
           ...messages[existingIndex],
           ...message,
@@ -197,8 +203,8 @@ export class MonitorService {
 
     // Sort messages by timestamp
     messages.sort((a, b) => {
-      const timeA = new Date(a.timestamp || 0).getTime();
-      const timeB = new Date(b.timestamp || 0).getTime();
+      const timeA = new Date(a.timestamp ?? 0).getTime();
+      const timeB = new Date(b.timestamp ?? 0).getTime();
       return timeA - timeB;
     });
 

@@ -64,7 +64,8 @@ const tabStates = new Map<number, TabState>();
 const cleanupTabs = (): void => {
   const now = Date.now();
   Array.from(tabStates.entries()).forEach(([tabId, state]) => {
-    if (now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    const timeSinceLastHeartbeat = now - state.lastHeartbeat;
+    if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT) {
       tabStates.delete(tabId);
     }
   });
@@ -72,13 +73,13 @@ const cleanupTabs = (): void => {
 
 // Send state update to all connected popups
 const broadcastStateUpdate = (tabId: number): void => {
-  const state = tabStates.get(tabId)?.state;
-  if (!state) return;
+  const tabState = tabStates.get(tabId);
+  if (tabState?.state === null) return;
 
   const message: OutgoingMessage = {
     type: 'state_update',
     timestamp: Date.now(),
-    state,
+    state: tabState.state,
   };
 
   void chrome.runtime.sendMessage(message);
@@ -89,10 +90,10 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   if (message.type === 'heartbeat') {
     const { timestamp, status } = message;
     const tabId = _sender.tab?.id;
-    if (!tabId) return false;
+    if (tabId === undefined) return false;
 
     let tabState = tabStates.get(tabId);
-    if (!tabState) {
+    if (tabState === undefined) {
       tabState = {
         lastHeartbeat: timestamp,
         state: {
@@ -104,7 +105,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
       tabStates.set(tabId, tabState);
     } else {
       tabState.lastHeartbeat = timestamp;
-      if (tabState.state) {
+      if (tabState.state !== null) {
         tabState.state.isExtracting = status.isExtracting;
         tabState.state.currentChannel = status.channelInfo;
       }
@@ -115,10 +116,10 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   } else if (message.type === 'sync') {
     const { timestamp, data } = message;
     const tabId = _sender.tab?.id;
-    if (!tabId) return false;
+    if (tabId === undefined) return false;
 
     let tabState = tabStates.get(tabId);
-    if (!tabState) {
+    if (tabState === undefined) {
       tabState = {
         lastHeartbeat: timestamp,
         state: {
@@ -130,7 +131,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
       tabStates.set(tabId, tabState);
     } else {
       tabState.lastHeartbeat = timestamp;
-      if (tabState.state) {
+      if (tabState.state !== null) {
         tabState.state.currentChannel = data.currentChannel;
         tabState.state.extractedMessages = data.extractedMessages;
       }
@@ -141,7 +142,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   } else if (message.type === 'popup_status') {
     const { tabId } = message;
     const tabState = tabStates.get(tabId);
-    sendResponse({ state: tabState?.state || null });
+    sendResponse({ state: tabState?.state ?? null });
   }
 
   return true;

@@ -49,7 +49,8 @@ export class ConnectionService {
   }
 
   public checkConnection(): void {
-    if (Date.now() - this.lastHeartbeat > ConnectionService.HEARTBEAT_TIMEOUT) {
+    const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
+    if (timeSinceLastHeartbeat > ConnectionService.HEARTBEAT_TIMEOUT) {
       this.handleConnectionLoss();
     }
   }
@@ -104,11 +105,11 @@ export class ConnectionService {
   }
 
   private clearIntervals(): void {
-    if (this.heartbeatInterval) {
+    if (this.heartbeatInterval !== null) {
       window.clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-    if (this.syncInterval) {
+    if (this.syncInterval !== null) {
       window.clearInterval(this.syncInterval);
       this.syncInterval = null;
     }

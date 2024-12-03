@@ -4,13 +4,13 @@ import type { ExtensionState, MessagesByOrganization } from './types';
 export class StorageService {
   public async loadState(): Promise<ExtensionState> {
     const result = await chrome.storage.local.get(['extensionState']);
-    return (
-      result.extensionState || {
-        isExtracting: false,
-        currentChannel: null,
-        extractedMessages: {},
-      }
-    );
+    return typeof result.extensionState === 'object' && result.extensionState !== null
+      ? result.extensionState
+      : {
+          isExtracting: false,
+          currentChannel: null,
+          extractedMessages: {},
+        };
   }
 
   public async saveState(state: ExtensionState): Promise<void> {
@@ -19,7 +19,9 @@ export class StorageService {
 
   public async loadAllMessages(): Promise<MessagesByOrganization> {
     const result = await chrome.storage.local.get(['allMessages']);
-    return result.allMessages || {};
+    return typeof result.allMessages === 'object' && result.allMessages !== null
+      ? result.allMessages
+      : {};
   }
 
   public async saveAllMessages(messages: MessagesByOrganization): Promise<void> {
