@@ -1,8 +1,16 @@
 {
   "name": "auto-slack-chrome",
   "version": "1.0.0",
-  "description": "Chrome extension built with TypeScript",
-  "main": "index.js",
+  "description": "Chrome extension for automated Slack message extraction and organization",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mherod/auto-slack-chrome.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mherod/auto-slack-chrome/issues"
+  },
+  "homepage": "https://github.com/mherod/auto-slack-chrome#readme",
   "engines": {
     "node": ">=18.19.1",
     "pnpm": ">=8.0.0"
@@ -16,7 +24,8 @@
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "husky install",
-    "pre-commit": "lint-staged && pnpm type-check && pnpm build"
+    "pre-commit": "lint-staged && pnpm type-check && pnpm build",
+    "package": "pnpm build && cd dist && zip -r ../extension.zip ."
   },
   "lint-staged": {
     "*.ts": [
@@ -26,10 +35,16 @@
   },
   "keywords": [
     "chrome-extension",
-    "typescript"
+    "typescript",
+    "slack",
+    "message-extraction",
+    "automation"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": {
+    "name": "Matthew Herod",
+    "url": "https://github.com/mherod"
+  },
+  "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.16.0",
     "@types/chrome": "^0.0.287",
