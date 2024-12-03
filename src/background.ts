@@ -75,6 +75,7 @@ const cleanupTabs = (): void => {
 const broadcastStateUpdate = (tabId: number): void => {
   const tabState = tabStates.get(tabId);
   if (tabState?.state === null) return;
+  if (tabState === undefined) return;
 
   const message: OutgoingMessage = {
     type: 'state_update',
