@@ -165,4 +165,14 @@ module.exports = [
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    files: ['src/background.ts'],
+    languageOptions: {
+      globals: {
+        self: true,
+        ServiceWorkerGlobalScope: true,
+        chrome: true
+      }
+    }
+  },
 ];

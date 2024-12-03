@@ -1,3 +1,5 @@
+/// <reference lib="webworker" />
+
 import type { MessagesByOrganization } from './services/extraction';
 
 interface BackgroundState {
