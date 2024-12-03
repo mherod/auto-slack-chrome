@@ -332,6 +332,12 @@ export class MonitorService {
             isInferredSender: isInferred,
           };
 
+          // Extract attachments if present
+          const attachments = this.messageExtractor.extractAttachments(listItem);
+          if (attachments) {
+            message.attachments = attachments;
+          }
+
           // Only add valid messages to the hierarchy and mark them as extracted
           if (this.messageExtractor.isValidMessage(message)) {
             await this.updateMessageHierarchy(message);

@@ -5,17 +5,39 @@ export const CustomStatusSchema = z.object({
   emojiUrl: z.string().nullable(),
 });
 
-export const SlackMessageSchema = z.object({
-  sender: z.string().nullable(),
-  senderId: z.string().nullable(),
-  timestamp: z.string().nullable(),
-  text: z.string(),
-  permalink: z.string().nullable(),
-  customStatus: CustomStatusSchema.nullable(),
-  avatarUrl: z.string().nullable(),
-  messageId: z.string().nullable(),
-  isInferredSender: z.boolean().default(false),
+export const AttachmentImageSchema = z.object({
+  url: z.string(),
+  thumbnailUrl: z.string().nullable(),
+  alt: z.string().nullable(),
 });
+
+export const AttachmentSchema = z.object({
+  type: z.string(),
+  title: z.string().nullable(),
+  text: z.string().nullable(),
+  authorName: z.string().nullable(),
+  authorIcon: z.string().nullable(),
+  footerText: z.string().nullable(),
+  timestamp: z.string().nullable(),
+  permalink: z.string().nullable(),
+  images: z.array(AttachmentImageSchema).nullable(),
+});
+
+export const SlackMessageSchema = z
+  .object({
+    sender: z.string().nullable(),
+    senderId: z.string().nullable(),
+    timestamp: z.string().nullable(),
+    text: z.string(),
+    permalink: z.string().nullable(),
+    customStatus: CustomStatusSchema.nullable(),
+    avatarUrl: z.string().nullable(),
+    messageId: z.string().nullable(),
+    isInferredSender: z.boolean().default(false),
+  })
+  .extend({
+    attachments: z.array(AttachmentSchema).optional(),
+  });
 
 export const ChannelInfoSchema = z.object({
   channel: z.string(),
@@ -78,6 +100,8 @@ export const IncomingMessageSchema = z.union([
 
 // Export inferred types
 export type CustomStatus = z.infer<typeof CustomStatusSchema>;
+export type AttachmentImage = z.infer<typeof AttachmentImageSchema>;
+export type Attachment = z.infer<typeof AttachmentSchema>;
 export type SlackMessage = z.infer<typeof SlackMessageSchema>;
 export type ChannelInfo = z.infer<typeof ChannelInfoSchema>;
 export type MessagesByDate = z.infer<typeof MessagesByDateSchema>;

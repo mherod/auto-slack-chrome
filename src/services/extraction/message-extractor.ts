@@ -4,7 +4,9 @@ import {
   type LastKnownSender,
   type SenderInfo,
   type SlackMessage,
-} from './types';
+  type Attachment,
+  type AttachmentImage,
+} from './schemas';
 
 export class MessageExtractor {
   private lastKnownSender: LastKnownSender | null = null;
@@ -271,6 +273,84 @@ export class MessageExtractor {
     }
 
     return { timestamp, permalink };
+  }
+
+  public extractAttachments(messageElement: Element): Attachment[] | undefined {
+    const attachmentsContainer = messageElement.querySelector('.c-message_kit__attachments');
+    if (!attachmentsContainer) return undefined;
+
+    const attachments: Attachment[] = [];
+    const attachmentElements = attachmentsContainer.querySelectorAll('.c-message_attachment');
+
+    for (const attachmentElement of attachmentElements) {
+      const attachment: Attachment = {
+        type: 'message_attachment',
+        title: null,
+        text: null,
+        authorName: null,
+        authorIcon: null,
+        footerText: null,
+        timestamp: null,
+        permalink: null,
+        images: null,
+      };
+
+      // Extract author info
+      const authorElement = attachmentElement.querySelector('.c-message_attachment__author');
+      if (authorElement) {
+        attachment.authorName = authorElement.textContent?.trim() ?? null;
+        const authorIcon = authorElement.querySelector('img');
+        attachment.authorIcon = authorIcon?.getAttribute('src') ?? null;
+      }
+
+      // Extract text content
+      const textElement = attachmentElement.querySelector(
+        '[data-qa="message_attachment_slack_msg_text"]',
+      );
+      if (textElement) {
+        attachment.text = textElement.textContent?.trim() ?? null;
+      }
+
+      // Extract footer
+      const footerElement = attachmentElement.querySelector('[data-qa="attachment-footer"]');
+      if (footerElement) {
+        attachment.footerText = footerElement.textContent?.trim() ?? null;
+        const timestampElement = footerElement.querySelector(
+          '[data-qa="attachment-footer-timestamp"] a',
+        );
+        if (timestampElement) {
+          attachment.timestamp = timestampElement.getAttribute('aria-label') ?? null;
+        }
+        const permalinkElement = footerElement.querySelector(
+          '[data-qa="attachment-footer-permalink"] a',
+        );
+        if (permalinkElement) {
+          attachment.permalink = permalinkElement.getAttribute('href') ?? null;
+        }
+      }
+
+      // Extract images
+      const images: AttachmentImage[] = [];
+      const imageElements = attachmentElement.querySelectorAll('.p-file_image_thumbnail__wrapper');
+      for (const imageElement of imageElements) {
+        const img = imageElement.querySelector('img');
+        if (img) {
+          images.push({
+            url: imageElement.getAttribute('href') ?? '',
+            thumbnailUrl: img.getAttribute('src') ?? null,
+            alt: img.getAttribute('alt') ?? null,
+          });
+        }
+      }
+
+      if (images.length > 0) {
+        attachment.images = images;
+      }
+
+      attachments.push(attachment);
+    }
+
+    return attachments.length > 0 ? attachments : undefined;
   }
 
   public resetLastKnownSender(): void {
