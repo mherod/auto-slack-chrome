@@ -1,6 +1,6 @@
 import { merge } from 'lodash';
-import type { ExtensionState, MessagesByOrganization } from './types';
 import { ExtensionStateSchema, MessagesByOrganizationSchema } from './schemas';
+import type { ExtensionState, MessagesByOrganization } from './types';
 
 export class StorageService {
   public async loadState(): Promise<ExtensionState> {
@@ -60,8 +60,91 @@ export class StorageService {
 
     // Merge with existing messages before saving
     const currentMessages = await this.loadAllMessages();
-    const mergedMessages = merge({}, currentMessages, validatedMessages);
+    const mergedMessages = this.deduplicateAndMergeMessages(currentMessages, validatedMessages);
     await chrome.storage.local.set({ allMessages: mergedMessages });
+  }
+
+  private deduplicateAndMergeMessages(
+    currentMessages: MessagesByOrganization,
+    newMessages: MessagesByOrganization,
+  ): MessagesByOrganization {
+    const result = merge({}, currentMessages);
+
+    // Iterate through new messages
+    for (const [org, orgData] of Object.entries(newMessages)) {
+      if (!(org in result)) {
+        result[org] = {};
+      }
+
+      for (const [channel, channelData] of Object.entries(orgData)) {
+        if (!(channel in result[org])) {
+          result[org][channel] = {};
+        }
+
+        for (const [date, messages] of Object.entries(channelData)) {
+          if (!(date in result[org][channel])) {
+            result[org][channel][date] = [];
+          }
+
+          // Process each new message
+          for (const newMessage of messages) {
+            const existingMessageIndex = result[org][channel][date].findIndex(
+              (existing) =>
+                // Match on content and sender
+                existing.text === newMessage.text &&
+                existing.sender === newMessage.sender &&
+                existing.senderId === newMessage.senderId &&
+                // Only match if we have valid timestamps
+                existing.timestamp !== null &&
+                newMessage.timestamp !== null &&
+                // Compare timestamps without milliseconds for deduplication
+                new Date(existing.timestamp).setMilliseconds(0) ===
+                  new Date(newMessage.timestamp).setMilliseconds(0),
+            );
+
+            if (existingMessageIndex !== -1) {
+              // Update existing message with any new information
+              const existingMessage = result[org][channel][date][existingMessageIndex];
+              result[org][channel][date][existingMessageIndex] = merge(
+                {},
+                existingMessage,
+                newMessage,
+                {
+                  // Preserve the original timestamp if it exists
+                  timestamp: existingMessage.timestamp ?? newMessage.timestamp,
+                  // Preserve the original messageId if it exists
+                  messageId: existingMessage.messageId ?? newMessage.messageId,
+                  // Keep the more accurate sender information
+                  isInferredSender: newMessage.isInferredSender && existingMessage.isInferredSender,
+                  sender: !newMessage.isInferredSender
+                    ? newMessage.sender
+                    : !existingMessage.isInferredSender
+                      ? existingMessage.sender
+                      : newMessage.sender,
+                  senderId: !newMessage.isInferredSender
+                    ? newMessage.senderId
+                    : !existingMessage.isInferredSender
+                      ? existingMessage.senderId
+                      : newMessage.senderId,
+                },
+              );
+            } else {
+              // Add new message
+              result[org][channel][date].push(newMessage);
+            }
+          }
+
+          // Sort messages by timestamp
+          result[org][channel][date].sort((a, b) => {
+            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return timeA - timeB;
+          });
+        }
+      }
+    }
+
+    return result;
   }
 
   public async mergeAndSaveMessages(
@@ -73,7 +156,10 @@ export class StorageService {
     const validatedNewMessages = MessagesByOrganizationSchema.parse(newMessages);
 
     const allMessages = await this.loadAllMessages();
-    const mergedMessages = merge({}, allMessages, validatedCurrentMessages, validatedNewMessages);
+    const mergedMessages = this.deduplicateAndMergeMessages(
+      allMessages,
+      this.deduplicateAndMergeMessages(validatedCurrentMessages, validatedNewMessages),
+    );
     await this.saveAllMessages(mergedMessages);
     return mergedMessages;
   }

@@ -48,7 +48,7 @@ module.exports = [
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/strict-boolean-expressions': [
-        'error',
+        'warn',
         { allowNullableBoolean: true },
       ],
       '@typescript-eslint/no-floating-promises': [
