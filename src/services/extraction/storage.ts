@@ -14,7 +14,17 @@ export class StorageService {
   }
 
   public async saveState(state: ExtensionState): Promise<void> {
-    await chrome.storage.local.set({ extensionState: state });
+    // Always merge with existing state
+    const currentState = await this.loadState();
+    const mergedState: ExtensionState = {
+      ...currentState,
+      ...state,
+      extractedMessages: await this.mergeAndSaveMessages(
+        currentState.extractedMessages,
+        state.extractedMessages,
+      ),
+    };
+    await chrome.storage.local.set({ extensionState: mergedState });
   }
 
   public async loadAllMessages(): Promise<MessagesByOrganization> {
