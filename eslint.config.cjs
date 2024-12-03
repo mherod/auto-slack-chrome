@@ -42,22 +42,64 @@ module.exports = [
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/strict-boolean-expressions': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        {
+          ignoreVoid: true,
+          ignoreIIFE: true,
+        },
+      ],
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            arguments: false,
+            attributes: false,
+          },
+        },
+      ],
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
       '@typescript-eslint/prefer-nullish-coalescing': 'error',
       '@typescript-eslint/prefer-optional-chain': 'error',
-      'no-restricted-globals': ['error', 'event', 'fdescribe'],
+      '@typescript-eslint/return-await': ['error', 'in-try-catch'],
+      'no-restricted-globals': [
+        'error',
+        'event',
+        'fdescribe',
+        {
+          name: 'fetch',
+          message: 'Use chrome.runtime.sendMessage for cross-origin requests'
+        },
+        {
+          name: 'history',
+          message: 'Use chrome.history API instead'
+        },
+        {
+          name: 'location',
+          message: 'Use chrome.tabs API for navigation'
+        }
+      ],
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'ForOfStatement',
-          message:
-            'Use Array.from() or spread operator with for...of to ensure browser compatibility',
+          selector: 'CallExpression[callee.object.name="window"][callee.property.name="open"]',
+          message: 'Use chrome.windows.create instead of window.open'
         },
+        {
+          selector: 'CallExpression[callee.object.name="window"][callee.property.name="close"]',
+          message: 'Use chrome.windows.remove instead of window.close'
+        },
+        {
+          selector: 'CallExpression[callee.name="eval"]',
+          message: 'eval() is dangerous and violates Chrome extension CSP'
+        },
+        {
+          selector: 'CallExpression[callee.name="Function"]',
+          message: 'new Function() is dangerous and violates Chrome extension CSP'
+        }
       ],
       'no-var': 'error',
       'prefer-const': 'error',
@@ -70,7 +112,7 @@ module.exports = [
       'no-implied-eval': 'error',
       'no-new-func': 'error',
       'no-new-wrappers': 'error',
-      'no-param-reassign': 'error',
+      'no-param-reassign': ['error', { props: true }],
       'no-return-await': 'error',
       'no-sequences': 'error',
       'no-throw-literal': 'error',
@@ -114,77 +156,10 @@ module.exports = [
           ],
         },
       ],
-      'no-restricted-globals': [
-        'error',
-        {
-          name: 'fetch',
-          message: 'Use chrome.runtime.sendMessage for cross-origin requests',
-        },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'CallExpression[callee.object.name="window"][callee.property.name="open"]',
-          message: 'Use chrome.windows.create instead of window.open',
-        },
-        {
-          selector: 'CallExpression[callee.object.name="window"][callee.property.name="close"]',
-          message: 'Use chrome.windows.remove instead of window.close',
-        },
-        {
-          selector: 'ForOfStatement',
-          message:
-            'Use Array.from() or spread operator with for...of to ensure browser compatibility',
-        },
-      ],
-      'no-restricted-globals': [
-        'error',
-        'event',
-        'fdescribe',
-        {
-          name: 'history',
-          message: 'Use chrome.history API instead',
-        },
-        {
-          name: 'location',
-          message: 'Use chrome.tabs API for navigation',
-        },
-      ],
-      'no-implied-eval': 'error',
-      'no-new-func': 'error',
       'no-script-url': 'error',
-      'no-param-reassign': ['error', { props: true }],
       'no-proto': 'error',
       'no-extend-native': 'error',
       'no-iterator': 'error',
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'CallExpression[callee.name="eval"]',
-          message: 'eval() is dangerous and violates Chrome extension CSP',
-        },
-        {
-          selector: 'CallExpression[callee.name="Function"]',
-          message: 'new Function() is dangerous and violates Chrome extension CSP',
-        },
-      ],
-      '@typescript-eslint/no-floating-promises': [
-        'error',
-        {
-          ignoreVoid: true,
-          ignoreIIFE: true,
-        },
-      ],
-      '@typescript-eslint/no-misused-promises': [
-        'error',
-        {
-          checksVoidReturn: {
-            arguments: false,
-            attributes: false,
-          },
-        },
-      ],
-      '@typescript-eslint/return-await': ['error', 'in-try-catch'],
     },
   },
   {
