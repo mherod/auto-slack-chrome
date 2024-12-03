@@ -45,142 +45,212 @@ const popupState: PopupState = {
 
 // Update UI based on current state
 const updateUI = (): void => {
+  const statusElement = document.getElementById('status');
+  const channelInfoElement = document.getElementById('channelInfo');
+  const messageCountElement = document.getElementById('messageCount');
+  const messageStatsElement = document.getElementById('messageStats');
   const startButton = document.getElementById('startButton') as HTMLButtonElement;
   const stopButton = document.getElementById('stopButton') as HTMLButtonElement;
   const downloadButton = document.getElementById('downloadButton') as HTMLButtonElement;
-  const statusText = document.getElementById('status') as HTMLDivElement;
-  const channelInfo = document.getElementById('channelInfo') as HTMLDivElement;
-  const messageCount = document.getElementById('messageCount') as HTMLDivElement;
+
+  if (statusElement === null || channelInfoElement === null || messageCountElement === null) {
+    return;
+  }
 
   if (!popupState.isConnected) {
-    statusText.textContent = 'Connecting...';
+    statusElement.textContent = 'Not connected to Slack';
     startButton.disabled = true;
     stopButton.disabled = true;
     downloadButton.disabled = true;
-    channelInfo.textContent = '';
-    messageCount.textContent = '';
     return;
   }
 
   if (popupState.state === null) {
-    statusText.textContent = 'No active extraction';
+    statusElement.textContent = 'Connected to Slack';
     startButton.disabled = false;
     stopButton.disabled = true;
     downloadButton.disabled = true;
-    channelInfo.textContent = '';
-    messageCount.textContent = '';
     return;
   }
 
-  const { isExtracting, currentChannel, extractedMessages } = popupState.state;
-
-  // Update extraction controls
-  startButton.disabled = isExtracting;
-  stopButton.disabled = !isExtracting;
-
   // Update status
-  statusText.textContent = isExtracting ? 'Extracting messages...' : 'Ready';
+  statusElement.textContent = popupState.state.isExtracting
+    ? 'Extracting messages...'
+    : 'Connected to Slack';
 
   // Update channel info
-  if (currentChannel !== null) {
-    channelInfo.textContent = `Channel: ${currentChannel.channel} (${currentChannel.organization})`;
+  if (popupState.state.currentChannel !== null) {
+    channelInfoElement.textContent = `Current channel: ${popupState.state.currentChannel.channel} (${popupState.state.currentChannel.organization})`;
   } else {
-    channelInfo.textContent = 'No channel selected';
+    channelInfoElement.textContent = 'No channel selected';
   }
 
-  // Count total messages
-  const totalMessages = Object.values(extractedMessages)
-    .flatMap((org) => Object.values(org))
-    .flatMap((channel) => Object.values(channel))
-    .reduce((acc, messages) => acc + messages.length, 0);
+  // Update buttons
+  startButton.disabled = popupState.state.isExtracting;
+  stopButton.disabled = !popupState.state.isExtracting;
+  downloadButton.disabled = false;
 
-  messageCount.textContent = `Messages: ${totalMessages}`;
+  // Update message stats
+  if (messageStatsElement !== null) {
+    const stats = calculateMessageStats(popupState.state.extractedMessages);
+    messageStatsElement.innerHTML = generateStatsHTML(stats);
+    setupStatsInteractivity();
+  }
 
-  // Enable download if we have messages
-  downloadButton.disabled = totalMessages === 0;
+  // Update total message count
+  const totalMessages = calculateTotalMessages(popupState.state.extractedMessages);
+  messageCountElement.textContent = `Total messages: ${totalMessages}`;
 };
 
-// Request current state from background script
-const requestState = async (): Promise<void> => {
-  if (popupState.activeTabId === null) return;
+interface ChannelStats {
+  name: string;
+  messageCount: number;
+}
 
-  void chrome.runtime.sendMessage(
-    {
+interface OrganizationStats {
+  name: string;
+  messageCount: number;
+  channels: ChannelStats[];
+}
+
+const calculateMessageStats = (
+  messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
+): OrganizationStats[] => {
+  return Object.entries(messages)
+    .map(([orgName, orgData]) => {
+      const channels = Object.entries(orgData).map(([channelName, channelData]) => {
+        const messageCount = Object.values(channelData).reduce(
+          (sum, messages) => sum + messages.length,
+          0,
+        );
+        return { name: channelName, messageCount };
+      });
+
+      const messageCount = channels.reduce((sum, channel) => sum + channel.messageCount, 0);
+
+      return {
+        name: orgName,
+        messageCount,
+        channels: channels.sort((a, b) => b.messageCount - a.messageCount),
+      };
+    })
+    .sort((a, b) => b.messageCount - a.messageCount);
+};
+
+const generateStatsHTML = (stats: OrganizationStats[]): string => {
+  return stats
+    .map(
+      (org, index) => `
+        <div class="org-section" data-org-index="${index}">
+          <div class="org-header">
+            <span class="expand-icon">▶</span>
+            <span class="org-name">${org.name}</span>
+            <span class="org-count">${org.messageCount} messages</span>
+          </div>
+          <div class="channel-section">
+            ${org.channels
+              .map(
+                (channel) => `
+                <div class="channel-row">
+                  <span class="channel-name">${channel.name}</span>
+                  <span class="channel-count">${channel.messageCount} messages</span>
+                </div>
+              `,
+              )
+              .join('')}
+          </div>
+          ${index < stats.length - 1 ? '<div class="divider"></div>' : ''}
+        </div>
+      `,
+    )
+    .join('');
+};
+
+const setupStatsInteractivity = (): void => {
+  document.querySelectorAll('.org-header').forEach((header) => {
+    header.addEventListener('click', () => {
+      const section = header.closest('.org-section');
+      const channelSection = section?.querySelector('.channel-section');
+      if (channelSection) {
+        channelSection.classList.toggle('expanded');
+        header.querySelector('.expand-icon')?.classList.toggle('expanded');
+      }
+    });
+  });
+};
+
+const calculateTotalMessages = (
+  messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
+): number => {
+  return Object.values(messages)
+    .flatMap((org) => Object.values(org))
+    .flatMap((channel) => Object.values(channel))
+    .reduce((sum, messages) => sum + messages.length, 0);
+};
+
+// Handle messages from background script
+const handleMessage = (message: PopupMessage): void => {
+  if (message.type === 'state_update') {
+    popupState.state = message.state;
+    updateUI();
+  }
+};
+
+// Send status message to background script
+const sendStatusMessage = (): void => {
+  if (popupState.activeTabId !== null) {
+    const message: StatusMessage = {
       type: 'popup_status',
       timestamp: Date.now(),
       tabId: popupState.activeTabId,
-    },
-    (response) => {
-      if (chrome.runtime.lastError !== undefined) {
-        popupState.isConnected = false;
-        updateUI();
-        return;
-      }
+    };
+    void chrome.runtime.sendMessage(message);
+  }
+};
 
-      if (response?.state !== undefined) {
-        popupState.isConnected = true;
-        popupState.state = response.state;
-        popupState.lastSync = Date.now();
-        updateUI();
-      }
-    },
-  );
+// Start periodic sync
+const startSync = (): void => {
+  sendStatusMessage();
+  window.setInterval(sendStatusMessage, POPUP_SYNC_INTERVAL);
 };
 
 // Initialize popup
-const initializePopup = async (): Promise<void> => {
-  // Get current tab
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id !== undefined) {
-    popupState.activeTabId = tab.id;
+const initialize = async (): Promise<void> => {
+  // Get active tab
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+
+  if (activeTab?.id !== undefined) {
+    popupState.activeTabId = activeTab.id;
+    popupState.isConnected = activeTab.url?.includes('slack.com') ?? false;
   }
 
-  // Set up start button
+  // Set up message listener
+  chrome.runtime.onMessage.addListener(handleMessage);
+
+  // Set up button handlers
   const startButton = document.getElementById('startButton');
-  if (startButton !== null) {
-    startButton.addEventListener('click', () => {
-      if (popupState.activeTabId === null) return;
-
-      void chrome.tabs.sendMessage(popupState.activeTabId, {
-        type: 'START_EXTRACTION',
-      } as ExtractionControlMessage);
-
-      // Update UI immediately for responsiveness
-      if (popupState.state !== null) {
-        popupState.state.isExtracting = true;
-        updateUI();
-      }
-    });
-  }
-
-  // Set up stop button
   const stopButton = document.getElementById('stopButton');
-  if (stopButton !== null) {
-    stopButton.addEventListener('click', () => {
-      if (popupState.activeTabId === null) return;
-
-      void chrome.tabs.sendMessage(popupState.activeTabId, {
-        type: 'STOP_EXTRACTION',
-      } as ExtractionControlMessage);
-
-      // Update UI immediately for responsiveness
-      if (popupState.state !== null) {
-        popupState.state.isExtracting = false;
-        updateUI();
-      }
-    });
-  }
-
-  // Set up download button
   const downloadButton = document.getElementById('downloadButton');
-  if (downloadButton !== null) {
-    downloadButton.addEventListener('click', () => {
-      if (popupState.state?.extractedMessages === undefined) return;
 
-      const blob = new Blob([JSON.stringify(popupState.state.extractedMessages, null, 2)], {
-        type: 'application/json',
-      });
+  startButton?.addEventListener('click', () => {
+    const message: ExtractionControlMessage = { type: 'START_EXTRACTION' };
+    if (popupState.activeTabId !== null) {
+      void chrome.tabs.sendMessage(popupState.activeTabId, message);
+    }
+  });
 
+  stopButton?.addEventListener('click', () => {
+    const message: ExtractionControlMessage = { type: 'STOP_EXTRACTION' };
+    if (popupState.activeTabId !== null) {
+      void chrome.tabs.sendMessage(popupState.activeTabId, message);
+    }
+  });
+
+  downloadButton?.addEventListener('click', () => {
+    if (popupState.state !== null) {
+      const data = JSON.stringify(popupState.state.extractedMessages, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -189,26 +259,15 @@ const initializePopup = async (): Promise<void> => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    });
-  }
+    }
+  });
 
-  // Start sync interval
-  window.setInterval(() => void requestState(), POPUP_SYNC_INTERVAL);
-
-  // Initial state request
-  void requestState();
+  // Start sync and update UI
+  startSync();
+  updateUI();
 };
 
-// Listen for state updates from background script
-chrome.runtime.onMessage.addListener((message: PopupMessage, _sender, _sendResponse) => {
-  if (message.type === 'state_update' && popupState.activeTabId !== null) {
-    popupState.isConnected = true;
-    popupState.state = message.state;
-    popupState.lastSync = message.timestamp;
-    updateUI();
-  }
-  return true;
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  void initialize();
 });
-
-// Initialize when popup loads
-document.addEventListener('DOMContentLoaded', () => void initializePopup());
