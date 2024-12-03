@@ -34,7 +34,7 @@ interface ExtractionControlMessage {
 
 type PopupMessage = StatusMessage | StateUpdateMessage;
 
-const POPUP_SYNC_INTERVAL = 1000; // 1 second for popup since it's temporary
+const POPUP_SYNC_INTERVAL = 2500; // 2.5 seconds for popup since it's temporary
 
 const popupState: PopupState = {
   isConnected: false,
