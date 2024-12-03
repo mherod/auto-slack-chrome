@@ -2,8 +2,8 @@ import type { HeartbeatMessage, SyncMessage, MessagesByOrganization, ChannelInfo
 
 export class ConnectionService {
   private static readonly HEARTBEAT_INTERVAL = 5000; // 5 seconds
-  private static readonly SYNC_INTERVAL = 30000; // 30 seconds
-  private static readonly HEARTBEAT_TIMEOUT = 15000; // 15 seconds
+  private static readonly SYNC_INTERVAL = 10000; // 10 seconds
+  private static readonly HEARTBEAT_TIMEOUT = 10000; // 10 seconds
 
   private heartbeatInterval: number | null = null;
   private syncInterval: number | null = null;

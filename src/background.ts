@@ -56,9 +56,9 @@ interface StateUpdateMessage {
 type IncomingMessage = HeartbeatMessage | SyncMessage | PopupStatusMessage;
 type OutgoingMessage = StateUpdateMessage;
 
-const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
-const CLEANUP_INTERVAL = 60000; // 1 minute
-const SYNC_INTERVAL = 30000;
+const HEARTBEAT_TIMEOUT = 10000; // 10 seconds
+const CLEANUP_INTERVAL = 10000; // 10 seconds
+const SYNC_INTERVAL = 10000; // 10 seconds
 
 const tabStates = new Map<number, TabState>();
 

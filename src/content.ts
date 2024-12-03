@@ -13,6 +13,7 @@ let storageService: StorageService;
 
 const RETRY_DELAY = 1000; // 1 second
 const MAX_RETRIES = 3;
+const CONNECTION_CHECK_INTERVAL = 10000; // 10 seconds
 let retryCount = 0;
 
 const isContextInvalidated = (error: unknown): boolean => {
@@ -169,7 +170,7 @@ const startConnectionCheck = (): void => {
           handleContextInvalidation();
         }
       }
-    }, 15000); // 15 seconds
+    }, CONNECTION_CHECK_INTERVAL);
   }
 };
 

@@ -14,7 +14,9 @@ export class MonitorService {
   private pollingInterval: number | null = null;
   private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
   private readonly SCROLL_DEBOUNCE_MS = 250;
-  private readonly POLLING_INTERVAL_MS = 2000; // Poll every 2 seconds
+  private readonly POLLING_INTERVAL_MS = 2500; // Poll every 2.5 seconds
+  private readonly TITLE_CHECK_INTERVAL_MS = 5000; // Check title every 5 seconds
+  private readonly RECONNECT_CHECK_INTERVAL_MS = 7500; // Check connection every 7.5 seconds
   private isExtracting = false;
 
   public constructor(
@@ -219,7 +221,7 @@ export class MonitorService {
         }
         this.setupMessageObserver();
       }
-    }, 5000); // Check every 5 seconds
+    }, this.RECONNECT_CHECK_INTERVAL_MS);
   }
 
   private setupTitleObserver(): void {
@@ -234,8 +236,11 @@ export class MonitorService {
       });
     }
 
-    // Set up periodic title check (every 5 seconds)
-    this.titleCheckInterval = window.setInterval(() => void this.checkChannelChange(), 5000);
+    // Set up periodic title check
+    this.titleCheckInterval = window.setInterval(
+      () => void this.checkChannelChange(),
+      this.TITLE_CHECK_INTERVAL_MS,
+    );
   }
 
   private async checkChannelChange(): Promise<void> {
