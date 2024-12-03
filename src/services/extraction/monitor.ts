@@ -225,9 +225,21 @@ export class MonitorService {
         newChannelInfo.channel !== this.currentChannelInfo.channel ||
         newChannelInfo.organization !== this.currentChannelInfo.organization)
     ) {
+      // Update channel info
       this.currentChannelInfo = newChannelInfo;
+
+      // Disconnect and reconnect observer to ensure clean state
+      if (this.observer !== null) {
+        this.observer.disconnect();
+      }
+      this.setupMessageObserver();
+
+      // Extract messages in new channel
       await this.extractMessages();
       this.onChannelChange(newChannelInfo);
+
+      // Update timestamp to prevent unnecessary reconnection
+      this.lastMessageTimestamp = Date.now();
     }
   }
 
