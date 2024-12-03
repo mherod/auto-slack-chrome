@@ -165,10 +165,10 @@ let syncInterval: number | null = null;
 
 const startIntervals = (): void => {
   if (cleanupInterval === null) {
-    cleanupInterval = window.setInterval(cleanupTabs, CLEANUP_INTERVAL);
+    cleanupInterval = self.setInterval(cleanupTabs, CLEANUP_INTERVAL);
   }
   if (syncInterval === null) {
-    syncInterval = window.setInterval(() => {
+    syncInterval = self.setInterval(() => {
       Array.from(tabStates.keys()).forEach((tabId) => {
         broadcastStateUpdate(tabId);
       });
@@ -178,11 +178,11 @@ const startIntervals = (): void => {
 
 const stopIntervals = (): void => {
   if (cleanupInterval !== null) {
-    window.clearInterval(cleanupInterval);
+    self.clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
   if (syncInterval !== null) {
-    window.clearInterval(syncInterval);
+    self.clearInterval(syncInterval);
     syncInterval = null;
   }
 };
