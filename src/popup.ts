@@ -92,9 +92,7 @@ const updateUI = (): void => {
 
   // Update message stats
   if (messageStatsElement !== null) {
-    const stats = calculateMessageStats(popupState.state.extractedMessages);
-    messageStatsElement.innerHTML = generateStatsHTML(stats);
-    setupStatsInteractivity();
+    updateMessageStats(messageStatsElement, popupState.state.extractedMessages);
   }
 
   // Update total message count
@@ -137,45 +135,111 @@ const calculateMessageStats = (
     .sort((a, b) => b.messageCount - a.messageCount);
 };
 
-const generateStatsHTML = (stats: OrganizationStats[]): string => {
-  return stats
-    .map(
-      (org, index) => `
-        <div class="org-section" data-org-index="${index}">
-          <div class="org-header">
-            <span class="expand-icon">▶</span>
-            <span class="org-name">${org.name}</span>
-            <span class="org-count">${org.messageCount} messages</span>
-          </div>
-          <div class="channel-section">
-            ${org.channels
-              .map(
-                (channel) => `
-                <div class="channel-row">
-                  <span class="channel-name">${channel.name}</span>
-                  <span class="channel-count">${channel.messageCount} messages</span>
-                </div>
-              `,
-              )
-              .join('')}
-          </div>
-          ${index < stats.length - 1 ? '<div class="divider"></div>' : ''}
-        </div>
-      `,
-    )
-    .join('');
-};
+const updateMessageStats = (
+  container: HTMLElement,
+  messages: Record<string, Record<string, Record<string, SlackMessage[]>>>,
+): void => {
+  const stats = calculateMessageStats(messages);
+  const expandedOrgs = new Set<string>();
 
-const setupStatsInteractivity = (): void => {
-  document.querySelectorAll('.org-header').forEach((header) => {
-    header.addEventListener('click', () => {
-      const section = header.closest('.org-section');
-      const channelSection = section?.querySelector('.channel-section');
-      if (channelSection) {
+  // Store currently expanded organizations
+  container.querySelectorAll('.org-section').forEach((section) => {
+    const orgName = section.querySelector('.org-name')?.textContent;
+    if (
+      orgName !== null &&
+      orgName !== undefined &&
+      section.querySelector('.channel-section.expanded') !== null
+    ) {
+      expandedOrgs.add(orgName);
+    }
+  });
+
+  // Update or create organization sections
+  stats.forEach((org, index) => {
+    let orgSection = container.querySelector(`[data-org-name="${org.name}"]`);
+    const isExpanded = expandedOrgs.has(org.name);
+
+    if (orgSection === null) {
+      // Create new organization section
+      orgSection = document.createElement('div');
+      orgSection.className = 'org-section';
+      orgSection.setAttribute('data-org-name', org.name);
+      container.appendChild(orgSection);
+
+      // Create organization header
+      const header = document.createElement('div');
+      header.className = 'org-header';
+      header.innerHTML = `
+        <span class="expand-icon">▶</span>
+        <span class="org-name">${org.name}</span>
+        <span class="org-count">${org.messageCount} messages</span>
+      `;
+      orgSection.appendChild(header);
+
+      // Create channel section
+      const channelSection = document.createElement('div');
+      channelSection.className = `channel-section${isExpanded ? ' expanded' : ''}`;
+      orgSection.appendChild(channelSection);
+
+      // Add click handler
+      header.addEventListener('click', () => {
         channelSection.classList.toggle('expanded');
         header.querySelector('.expand-icon')?.classList.toggle('expanded');
+      });
+    } else {
+      // Update existing organization section
+      const header = orgSection.querySelector('.org-header');
+      if (header !== null) {
+        const countElement = header.querySelector('.org-count');
+        if (countElement !== null) {
+          countElement.textContent = `${org.messageCount} messages`;
+        }
       }
-    });
+    }
+
+    // Update channel section
+    const channelSection = orgSection.querySelector('.channel-section');
+    if (channelSection !== null) {
+      // Maintain expanded state
+      if (isExpanded) {
+        channelSection.classList.add('expanded');
+        orgSection.querySelector('.expand-icon')?.classList.add('expanded');
+      }
+
+      // Update channels
+      channelSection.innerHTML = org.channels
+        .map(
+          (channel) => `
+          <div class="channel-row">
+            <span class="channel-name">${channel.name}</span>
+            <span class="channel-count">${channel.messageCount} messages</span>
+          </div>
+        `,
+        )
+        .join('');
+    }
+
+    // Add divider if not last
+    if (index < stats.length - 1) {
+      let divider = orgSection.nextElementSibling;
+      if (divider === null || !divider.classList.contains('divider')) {
+        divider = document.createElement('div');
+        divider.className = 'divider';
+        orgSection.after(divider);
+      }
+    }
+  });
+
+  // Remove any organizations that no longer exist
+  container.querySelectorAll('.org-section').forEach((section) => {
+    const orgName = section.getAttribute('data-org-name');
+    if (orgName !== null && !stats.some((org) => org.name === orgName)) {
+      const divider = section.nextElementSibling;
+      if (divider?.classList.contains('divider')) {
+        divider.remove();
+      }
+      section.remove();
+    }
   });
 };
 
