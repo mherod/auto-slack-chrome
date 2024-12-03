@@ -8,13 +8,48 @@ export class MonitorService {
   private titleCheckInterval: number | null = null;
   private extractedMessages: MessagesByOrganization = {};
   private currentChannelInfo: ChannelInfo | null = null;
+  private lastMessageTimestamp: number = Date.now();
+  private reconnectInterval: number | null = null;
+  private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
 
   public constructor(
     private readonly messageExtractor: MessageExtractor,
     private readonly storageService: StorageService,
     private readonly onChannelChange: (channelInfo: ChannelInfo) => void,
     private readonly onSync: () => void,
-  ) {}
+  ) {
+    this.injectStyles();
+  }
+
+  private injectStyles(): void {
+    const styleId = 'auto-slack-extraction-styles';
+    if (document.getElementById(styleId) !== null) return;
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      [${this.EXTRACTED_ATTRIBUTE}="true"]::after {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: #36C5AB;
+        opacity: 0.6;
+        position: absolute;
+        right: 8px;
+        top: 8px;
+        pointer-events: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  private markMessageAsExtracted(element: Element): void {
+    if (!element.hasAttribute(this.EXTRACTED_ATTRIBUTE)) {
+      element.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+    }
+  }
 
   public async startMonitoring(): Promise<void> {
     // Load previous state
@@ -28,15 +63,10 @@ export class MonitorService {
     this.setupTitleObserver();
 
     // Set up message observer
-    const container = this.messageExtractor.getMessageContainer();
-    if (container !== null) {
-      this.observer = new MutationObserver(() => {
-        void this.extractMessages();
-        this.onSync();
-      });
+    this.setupMessageObserver();
 
-      this.observer.observe(container, { childList: true, subtree: true });
-    }
+    // Set up reconnect check
+    this.setupReconnectCheck();
 
     // Initial extraction
     await this.extractMessages();
@@ -55,6 +85,11 @@ export class MonitorService {
     if (this.titleCheckInterval !== null) {
       window.clearInterval(this.titleCheckInterval);
       this.titleCheckInterval = null;
+    }
+
+    if (this.reconnectInterval !== null) {
+      window.clearInterval(this.reconnectInterval);
+      this.reconnectInterval = null;
     }
 
     // Save state
@@ -76,6 +111,33 @@ export class MonitorService {
         .reduce((acc, messages) => acc + messages.length, 0),
       extractedMessages: this.extractedMessages,
     };
+  }
+
+  private setupMessageObserver(): void {
+    const container = this.messageExtractor.getMessageContainer();
+    if (container !== null) {
+      this.observer = new MutationObserver(() => {
+        void this.extractMessages();
+        this.onSync();
+        this.lastMessageTimestamp = Date.now();
+      });
+
+      this.observer.observe(container, { childList: true, subtree: true });
+    }
+  }
+
+  private setupReconnectCheck(): void {
+    this.reconnectInterval = window.setInterval(() => {
+      const timeSinceLastMessage = Date.now() - this.lastMessageTimestamp;
+      if (timeSinceLastMessage > 10000) {
+        // 10 seconds
+        // Reconnect observer
+        if (this.observer !== null) {
+          this.observer.disconnect();
+        }
+        this.setupMessageObserver();
+      }
+    }, 5000); // Check every 5 seconds
   }
 
   private setupTitleObserver(): void {
@@ -159,9 +221,10 @@ export class MonitorService {
           isInferredSender: isInferred,
         };
 
-        // Only add valid messages to the hierarchy
+        // Only add valid messages to the hierarchy and mark them as extracted
         if (this.messageExtractor.isValidMessage(message)) {
           await this.updateMessageHierarchy(message);
+          this.markMessageAsExtracted(listItem);
         }
       }),
     );
