@@ -2,7 +2,8 @@
 
 > Export your Slack conversations with ease! 📥
 
-This Chrome extension helps you save and organize your Slack messages. Perfect for keeping track of important discussions, creating documentation, or archiving conversations.
+This Chrome extension helps you save and organize your Slack messages. Perfect for keeping track of
+important discussions, creating documentation, or archiving conversations.
 
 ## ✨ Features
 
@@ -17,11 +18,13 @@ This Chrome extension helps you save and organize your Slack messages. Perfect f
 ## 🚀 Getting Started
 
 1. Install dependencies:
+
 ```bash
 pnpm install
 ```
 
 2. Build the extension:
+
 ```bash
 pnpm build
 ```
@@ -34,11 +37,13 @@ pnpm build
 ## 💻 Development
 
 Watch mode for live updates:
+
 ```bash
 pnpm watch
 ```
 
 Other useful commands:
+
 ```bash
 pnpm lint        # Check code style
 pnpm lint:fix    # Fix code style
@@ -55,6 +60,7 @@ pnpm format      # Format code
 5. Use "Download Messages" to save your data
 
 The extension will organize messages by:
+
 - Organization
 - Channel/DM
 - Date

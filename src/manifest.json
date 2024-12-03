@@ -3,12 +3,7 @@
   "name": "Auto Slack Chrome",
   "version": "1.0.0",
   "description": "Chrome extension for automated Slack message extraction and organization",
-  "permissions": [
-    "activeTab",
-    "tabs",
-    "storage",
-    "unlimitedStorage"
-  ],
+  "permissions": ["activeTab", "tabs", "storage", "unlimitedStorage"],
   "background": {
     "service_worker": "background.js"
   },

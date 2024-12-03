@@ -237,7 +237,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // Broadcast state update to all tabs
         const tabs = await chrome.tabs.query({});
         const updatePromises = tabs.map(async (tab) => {
-          if (tab.id) {
+          if (tab.id !== undefined && tab.id !== null && tab.id !== 0) {
             try {
               await chrome.tabs.sendMessage(tab.id, {
                 type: 'state_update',

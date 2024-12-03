@@ -163,4 +163,34 @@ export class StorageService {
     await this.saveAllMessages(mergedMessages);
     return mergedMessages;
   }
+
+  public async deleteChannelMessages(organization: string, channel: string): Promise<void> {
+    if (organization === '' || channel === '') {
+      throw new Error('Organization and channel must not be empty');
+    }
+
+    const state = await this.loadState();
+    const hasMessages = state.extractedMessages[organization]?.[channel] !== undefined;
+    const hasOrg = state.extractedMessages[organization] !== undefined;
+
+    if (!hasMessages) {
+      throw new Error(`No messages found for channel ${channel} in organization ${organization}`);
+    }
+
+    // Remove the channel from state
+    const { [channel]: _, ...remainingChannels } = state.extractedMessages[organization];
+
+    // If org has no more channels, remove it
+    if (Object.keys(remainingChannels).length === 0) {
+      const { [organization]: __, ...remainingOrgs } = state.extractedMessages;
+      state.extractedMessages = remainingOrgs;
+    } else if (hasOrg) {
+      state.extractedMessages = {
+        ...state.extractedMessages,
+        [organization]: remainingChannels,
+      };
+    }
+
+    await this.saveState(state);
+  }
 }
