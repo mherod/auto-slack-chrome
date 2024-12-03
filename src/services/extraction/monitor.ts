@@ -10,7 +10,10 @@ export class MonitorService {
   private currentChannelInfo: ChannelInfo | null = null;
   private lastMessageTimestamp: number = Date.now();
   private reconnectInterval: number | null = null;
+  private scrollTimeout: number | null = null;
   private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
+  private readonly SCROLL_DEBOUNCE_MS = 250;
+  private isExtracting = false;
 
   public constructor(
     private readonly messageExtractor: MessageExtractor,
@@ -65,6 +68,9 @@ export class MonitorService {
     // Set up message observer
     this.setupMessageObserver();
 
+    // Set up scroll handler
+    this.setupScrollHandler();
+
     // Set up reconnect check
     this.setupReconnectCheck();
 
@@ -76,7 +82,7 @@ export class MonitorService {
   }
 
   public async stopMonitoring(): Promise<void> {
-    // Stop observers
+    // Stop observers and handlers
     if (this.observer !== null) {
       this.observer.disconnect();
       this.observer = null;
@@ -90,6 +96,17 @@ export class MonitorService {
     if (this.reconnectInterval !== null) {
       window.clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
+    }
+
+    if (this.scrollTimeout !== null) {
+      window.clearTimeout(this.scrollTimeout);
+      this.scrollTimeout = null;
+    }
+
+    // Remove scroll listener
+    const container = this.messageExtractor.getMessageContainer();
+    if (container !== null) {
+      container.removeEventListener('scroll', this.handleScroll);
     }
 
     // Save state
@@ -113,16 +130,60 @@ export class MonitorService {
     };
   }
 
+  private setupScrollHandler(): void {
+    const container = this.messageExtractor.getMessageContainer();
+    if (container !== null) {
+      container.addEventListener('scroll', this.handleScroll);
+    }
+  }
+
+  private handleScroll = (): void => {
+    if (this.scrollTimeout !== null) {
+      window.clearTimeout(this.scrollTimeout);
+    }
+
+    // Disconnect observer during scroll
+    if (this.observer !== null) {
+      this.observer.disconnect();
+    }
+
+    this.scrollTimeout = window.setTimeout(async () => {
+      if (!this.isExtracting) {
+        // Reconnect observer first
+        this.setupMessageObserver();
+
+        // Then extract messages
+        await this.extractMessages();
+        this.onSync();
+
+        // Update timestamp to prevent unnecessary reconnection
+        this.lastMessageTimestamp = Date.now();
+      }
+    }, this.SCROLL_DEBOUNCE_MS);
+  };
+
   private setupMessageObserver(): void {
     const container = this.messageExtractor.getMessageContainer();
     if (container !== null) {
+      // Clean up existing observer if it exists
+      if (this.observer !== null) {
+        this.observer.disconnect();
+      }
+
       this.observer = new MutationObserver(() => {
-        void this.extractMessages();
-        this.onSync();
-        this.lastMessageTimestamp = Date.now();
+        if (!this.isExtracting) {
+          void this.extractMessages();
+          this.onSync();
+          this.lastMessageTimestamp = Date.now();
+        }
       });
 
-      this.observer.observe(container, { childList: true, subtree: true });
+      this.observer.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-qa'],
+      });
     }
   }
 
@@ -171,63 +232,78 @@ export class MonitorService {
   }
 
   private async extractMessages(): Promise<void> {
-    // Update channel info
-    this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
-    if (this.currentChannelInfo === null) return;
+    if (this.isExtracting) return;
+    this.isExtracting = true;
 
-    const messageElements = document.querySelectorAll('[data-qa="virtual-list-item"]');
-    if (messageElements.length === 0) return;
+    try {
+      // Update channel info
+      this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
+      if (this.currentChannelInfo === null) return;
 
-    // Reset last known sender at the start of extraction
-    this.messageExtractor.resetLastKnownSender();
+      const messageElements = document.querySelectorAll('[data-qa="virtual-list-item"]');
+      if (messageElements.length === 0) return;
 
-    // Convert NodeList to Array for proper iteration
-    await Promise.all(
-      Array.from(messageElements).map(async (listItem) => {
-        // Get message ID from the list item
-        const messageId = listItem.getAttribute('id');
+      // Reset last known sender at the start of extraction
+      this.messageExtractor.resetLastKnownSender();
 
-        // Skip invalid messages and UI elements
-        if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
+      // Convert NodeList to Array for proper iteration
+      await Promise.all(
+        Array.from(messageElements).map(async (listItem) => {
+          // Skip already extracted messages unless they need sender update
+          if (
+            listItem.hasAttribute(this.EXTRACTED_ATTRIBUTE) &&
+            !listItem.hasAttribute('data-needs-sender-update')
+          ) {
+            return;
+          }
 
-        // Skip empty messages or UI elements without actual text content
-        const messageText = listItem.querySelector('[data-qa="message-text"]');
-        const text = messageText?.textContent ?? '';
-        if (text.trim() === '') return;
+          // Get message ID from the list item
+          const messageId = listItem.getAttribute('id');
 
-        // Extract sender information with follow-up message handling
-        const { sender, senderId, avatarUrl, customStatus, isInferred } =
-          this.messageExtractor.extractMessageSender(listItem);
+          // Skip invalid messages and UI elements
+          if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
 
-        // Get timestamp and permalink
-        const timestampElement = listItem.querySelector('.c-timestamp');
-        if (timestampElement === null) return;
+          // Skip empty messages or UI elements without actual text content
+          const messageText = listItem.querySelector('[data-qa="message-text"]');
+          const text = messageText?.textContent ?? '';
+          if (text.trim() === '') return;
 
-        const { timestamp, permalink } =
-          this.messageExtractor.extractMessageTimestamp(timestampElement);
+          // Extract sender information with follow-up message handling
+          const { sender, senderId, avatarUrl, customStatus, isInferred } =
+            this.messageExtractor.extractMessageSender(listItem);
 
-        // Skip messages without timestamps as they're likely UI elements
-        if (timestamp === null) return;
+          // Get timestamp and permalink
+          const timestampElement = listItem.querySelector('.c-timestamp');
+          if (timestampElement === null) return;
 
-        const message: SlackMessage = {
-          messageId,
-          sender,
-          senderId,
-          timestamp,
-          text,
-          permalink,
-          customStatus,
-          avatarUrl,
-          isInferredSender: isInferred,
-        };
+          const { timestamp, permalink } =
+            this.messageExtractor.extractMessageTimestamp(timestampElement);
 
-        // Only add valid messages to the hierarchy and mark them as extracted
-        if (this.messageExtractor.isValidMessage(message)) {
-          await this.updateMessageHierarchy(message);
-          this.markMessageAsExtracted(listItem);
-        }
-      }),
-    );
+          // Skip messages without timestamps as they're likely UI elements
+          if (timestamp === null) return;
+
+          const message: SlackMessage = {
+            messageId,
+            sender,
+            senderId,
+            timestamp,
+            text,
+            permalink,
+            customStatus,
+            avatarUrl,
+            isInferredSender: isInferred,
+          };
+
+          // Only add valid messages to the hierarchy and mark them as extracted
+          if (this.messageExtractor.isValidMessage(message)) {
+            await this.updateMessageHierarchy(message);
+            this.markMessageAsExtracted(listItem);
+          }
+        }),
+      );
+    } finally {
+      this.isExtracting = false;
+    }
   }
 
   private async updateMessageHierarchy(message: SlackMessage): Promise<void> {
