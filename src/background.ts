@@ -1,6 +1,15 @@
 /// <reference lib="webworker" />
 
-import type { MessagesByOrganization } from './services/extraction';
+import type {
+  ChannelInfo,
+  ExtractionStatusMessage,
+  HeartbeatMessage,
+  IncomingMessage,
+  MessagesByOrganization,
+  OutgoingMessage,
+  PopupStatusMessage,
+  SyncMessage,
+} from './services/extraction';
 import { StorageService } from './services/extraction';
 
 interface BackgroundState {
@@ -17,58 +26,16 @@ interface TabState {
   state: BackgroundState | null;
 }
 
-interface ChannelInfo {
-  channel: string;
-  organization: string;
-}
-
-interface HeartbeatMessage {
-  type: 'heartbeat';
-  timestamp: number;
-  status: {
-    isExtracting: boolean;
-    channelInfo: ChannelInfo | null;
-    messageCount: number;
-  };
-}
-
-interface SyncMessage {
-  type: 'sync';
-  timestamp: number;
-  data: {
-    extractedMessages: MessagesByOrganization;
-    currentChannel: ChannelInfo | null;
-  };
-}
-
-interface PopupStatusMessage {
-  type: 'popup_status';
-  timestamp: number;
-  tabId: number;
-}
-
-interface StateUpdateMessage {
-  type: 'state_update';
-  timestamp: number;
-  state: BackgroundState;
-}
-
-interface DeleteChannelMessage {
-  type: 'DELETE_CHANNEL_MESSAGES';
-  organization: string;
-  channel: string;
-}
-
-type IncomingMessage = HeartbeatMessage | SyncMessage | PopupStatusMessage | DeleteChannelMessage;
-type OutgoingMessage = StateUpdateMessage;
-
+// Constants
 const HEARTBEAT_TIMEOUT = 10000; // 10 seconds
 const CLEANUP_INTERVAL = 10000; // 10 seconds
 const SYNC_INTERVAL = 10000; // 10 seconds
 
+// Global state
 const tabStates = new Map<number, TabState>();
 const storageService = new StorageService();
 
+// State management helpers
 const createInitialState = (
   isExtracting: boolean,
   currentChannel: ChannelInfo | null,
@@ -82,7 +49,7 @@ const createInitialState = (
 const cleanupTabs = (): void => {
   const now = Date.now();
   for (const [tabId, state] of tabStates.entries()) {
-    if (typeof state.lastHeartbeat === 'number' && now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    if (now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
       tabStates.delete(tabId);
     }
   }
@@ -90,7 +57,7 @@ const cleanupTabs = (): void => {
 
 const broadcastStateUpdate = (tabId: number): void => {
   const tabState = tabStates.get(tabId);
-  if (typeof tabState?.state === 'object' && tabState.state !== null) {
+  if (tabState?.state) {
     const message: OutgoingMessage = {
       type: 'state_update',
       timestamp: Date.now(),
@@ -106,12 +73,13 @@ const broadcastStateUpdate = (tabId: number): void => {
 const reloadSlackTabs = async (): Promise<void> => {
   const tabs = await chrome.tabs.query({ url: 'https://app.slack.com/*' });
   for (const tab of tabs) {
-    if (typeof tab.id === 'number' && tab.id > 0) {
+    if (tab.id && tab.id > 0) {
       void chrome.tabs.reload(tab.id);
     }
   }
 };
 
+// Message handlers
 const handleHeartbeat = (
   message: HeartbeatMessage,
   tabId: number,
@@ -128,7 +96,7 @@ const handleHeartbeat = (
     tabStates.set(tabId, tabState);
   } else {
     tabState.lastHeartbeat = timestamp;
-    if (typeof tabState.state === 'object' && tabState.state !== null) {
+    if (tabState.state) {
       tabState.state.isExtracting = status.isExtracting;
       tabState.state.currentChannel = status.channelInfo;
     }
@@ -154,7 +122,7 @@ const handleSync = (
     tabStates.set(tabId, tabState);
   } else {
     tabState.lastHeartbeat = timestamp;
-    if (typeof tabState.state === 'object' && tabState.state !== null) {
+    if (tabState.state) {
       tabState.state.currentChannel = data.currentChannel;
       tabState.state.extractedMessages = data.extractedMessages;
     }
@@ -169,13 +137,17 @@ const handlePopupStatus = (
   sendResponse: (response: { state: BackgroundState | null }) => void,
 ): void => {
   const tabState = tabStates.get(message.tabId);
-  if (typeof tabState?.state === 'object' && tabState.state !== null) {
-    sendResponse({ state: tabState.state });
-  } else {
-    sendResponse({ state: null });
-  }
+  sendResponse({ state: tabState?.state ?? null });
 };
 
+const handleExtractionStatus = (
+  _message: ExtractionStatusMessage,
+  sendResponse: (response: { success: boolean }) => void,
+): void => {
+  sendResponse({ success: true });
+};
+
+// Message listener
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse): boolean => {
   try {
     const tabId = _sender.tab?.id;
@@ -187,7 +159,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
     }
 
     // For other message types, ensure we have a valid tab ID
-    if (typeof tabId !== 'number' || tabId <= 0) {
+    if (!tabId || tabId <= 0) {
       console.error('No valid tab ID for message:', message.type);
       sendResponse({ success: false, error: 'No valid tab ID' });
       return false;
@@ -199,6 +171,9 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
         break;
       case 'sync':
         handleSync(message, tabId, sendResponse);
+        break;
+      case 'EXTRACTION_STATUS':
+        handleExtractionStatus(message, sendResponse);
         break;
       default:
         console.error('Unknown message type:', message.type);
@@ -215,6 +190,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   return true;
 });
 
+// Interval management
 const startIntervals = (): void => {
   cleanupInterval ??= self.setInterval(cleanupTabs, CLEANUP_INTERVAL);
   syncInterval ??= self.setInterval(() => {
@@ -240,6 +216,7 @@ let syncInterval: number | null = null;
 
 startIntervals();
 
+// Chrome extension lifecycle handlers
 chrome.runtime.onInstalled.addListener(() => {
   void reloadSlackTabs();
 });
@@ -248,10 +225,11 @@ chrome.runtime.onSuspend.addListener(() => {
   stopIntervals();
 });
 
+// State broadcasting
 const broadcastStateToTabs = async (state: BackgroundState): Promise<void> => {
   const tabs = await chrome.tabs.query({});
   const updatePromises = tabs.map(async (tab) => {
-    if (tab.id && tab.id !== 0) {
+    if (tab.id && tab.id > 0) {
       try {
         await chrome.tabs.sendMessage(tab.id, {
           type: 'state_update',
@@ -267,6 +245,7 @@ const broadcastStateToTabs = async (state: BackgroundState): Promise<void> => {
   await Promise.all(updatePromises);
 };
 
+// Delete channel message handler
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'DELETE_CHANNEL_MESSAGES') {
     void (async (): Promise<void> => {

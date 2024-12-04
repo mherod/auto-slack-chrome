@@ -11,6 +11,11 @@ export type {
   HeartbeatMessage,
   SyncMessage,
   ExtractionControlMessage,
+  ExtractionStatusMessage,
+  PopupStatusMessage,
+  StateUpdateMessage,
+  DeleteChannelMessage,
   ContentScriptMessage,
   IncomingMessage,
+  OutgoingMessage,
 } from './schemas';

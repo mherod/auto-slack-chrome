@@ -120,12 +120,52 @@ export const ExtractionControlMessageSchema = z
   })
   .strict();
 
+export const ExtractionStatusMessageSchema = z
+  .object({
+    type: z.literal('EXTRACTION_STATUS'),
+    status: z.string(),
+  })
+  .strict();
+
+export const PopupStatusMessageSchema = z
+  .object({
+    type: z.literal('popup_status'),
+    timestamp: z.number(),
+    tabId: z.number(),
+  })
+  .strict();
+
+export const StateUpdateMessageSchema = z
+  .object({
+    type: z.literal('state_update'),
+    timestamp: z.number(),
+    state: ExtensionStateSchema,
+  })
+  .strict();
+
+export const DeleteChannelMessageSchema = z
+  .object({
+    type: z.literal('DELETE_CHANNEL_MESSAGES'),
+    organization: z.string(),
+    channel: z.string(),
+  })
+  .strict();
+
 // Pre-compile union types for better performance
-export const ContentScriptMessageSchema = z.union([HeartbeatMessageSchema, SyncMessageSchema]);
+export const ContentScriptMessageSchema = z.union([
+  HeartbeatMessageSchema,
+  SyncMessageSchema,
+  ExtractionStatusMessageSchema,
+]);
+
 export const IncomingMessageSchema = z.union([
   ContentScriptMessageSchema,
   ExtractionControlMessageSchema,
+  PopupStatusMessageSchema,
+  DeleteChannelMessageSchema,
 ]);
+
+export const OutgoingMessageSchema = StateUpdateMessageSchema;
 
 // Export inferred types
 export type CustomStatus = z.infer<typeof CustomStatusSchema>;
@@ -142,5 +182,10 @@ export type SenderInfo = z.infer<typeof SenderInfoSchema>;
 export type HeartbeatMessage = z.infer<typeof HeartbeatMessageSchema>;
 export type SyncMessage = z.infer<typeof SyncMessageSchema>;
 export type ExtractionControlMessage = z.infer<typeof ExtractionControlMessageSchema>;
+export type ExtractionStatusMessage = z.infer<typeof ExtractionStatusMessageSchema>;
+export type PopupStatusMessage = z.infer<typeof PopupStatusMessageSchema>;
+export type StateUpdateMessage = z.infer<typeof StateUpdateMessageSchema>;
+export type DeleteChannelMessage = z.infer<typeof DeleteChannelMessageSchema>;
 export type ContentScriptMessage = z.infer<typeof ContentScriptMessageSchema>;
 export type IncomingMessage = z.infer<typeof IncomingMessageSchema>;
+export type OutgoingMessage = z.infer<typeof OutgoingMessageSchema>;
