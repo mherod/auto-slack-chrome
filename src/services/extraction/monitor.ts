@@ -14,22 +14,24 @@ export class MonitorService {
   private pollingInterval: number | null = null;
   private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
   private readonly SCROLL_DEBOUNCE_MS = 250;
-  private readonly POLLING_INTERVAL_MS = 2500; // Poll every 2.5 seconds
-  private readonly TITLE_CHECK_INTERVAL_MS = 5000; // Check title every 5 seconds
-  private readonly RECONNECT_CHECK_INTERVAL_MS = 7500; // Check connection every 7.5 seconds
-  private readonly AUTO_SCROLL_STEP = 500; // Reduced from 1000 to 500 pixels per step
-  private readonly AUTO_SCROLL_INTERVAL_MS = 500; // Reduced from 1000 to 500ms between attempts
-  private readonly SCROLL_PAUSE_MS = 750; // Reduced from 1000 to 750ms pause between scrolls
-  private readonly MAX_SCROLL_ATTEMPTS = 50;
+  private readonly POLLING_INTERVAL_MS = 2000;
+  private readonly TITLE_CHECK_INTERVAL_MS = 5000;
+  private readonly RECONNECT_CHECK_INTERVAL_MS = 7500;
+  private readonly AUTO_SCROLL_STEP = 600;
+  private readonly AUTO_SCROLL_INTERVAL_MS = 400;
+  private readonly SCROLL_PAUSE_MS = 500;
+  private readonly MAX_SCROLL_ATTEMPTS = 75;
   private readonly SCROLL_THRESHOLD = 100;
-  private readonly MAX_WAIT_FOR_MESSAGES_MS = 3000; // Maximum time to wait for new messages
+  private readonly MAX_WAIT_FOR_MESSAGES_MS = 2000;
+  private readonly MAX_CONSECUTIVE_FAILURES = 3;
+  private readonly FORCE_SCROLL_MULTIPLIER = 1.5;
   private autoScrollInterval: number | null = null;
   private lastScrollPosition: number = 0;
   private scrollAttempts: number = 0;
   private lastMessageCount: number = 0;
   private isExtracting = false;
   private isAutoScrolling = false;
-  private readonly MAX_IDLE_TIME_MS = 10000; // Maximum time to stay idle before restarting scroll
+  private readonly MAX_IDLE_TIME_MS = 10000;
   private lastScrollTime: number = Date.now();
 
   public constructor(
@@ -340,7 +342,43 @@ export class MonitorService {
   }
 
   private async findAndScrollElement(): Promise<Element | null> {
-    // Find all elements with a visible scrollbar
+    // Try specific Slack selectors first
+    const slackSelectors = [
+      '.c-virtual_list__scroll_container',
+      '.p-workspace__primary_view_body',
+      '.p-message_pane',
+      '[data-qa="message_pane"]',
+      '[data-qa="virtual_list"]',
+      '.c-scrollbar__hider',
+    ];
+
+    // Try Slack-specific selectors first
+    for (const selector of slackSelectors) {
+      const element = document.querySelector(selector);
+      if (element instanceof HTMLElement) {
+        const style = window.getComputedStyle(element);
+        const isScrollable =
+          style.overflowY === 'scroll' ||
+          style.overflowY === 'auto' ||
+          element.scrollHeight > element.clientHeight;
+
+        if (isScrollable) {
+          const beforeScroll = element.scrollTop;
+          element.scrollTop = Math.max(0, element.scrollTop - this.AUTO_SCROLL_STEP);
+          await this.nextTick();
+          if (element.scrollTop !== beforeScroll) {
+            this.log('Found Slack scrollable element', {
+              selector,
+              scrollHeight: element.scrollHeight,
+              clientHeight: element.clientHeight,
+            });
+            return element;
+          }
+        }
+      }
+    }
+
+    // Fallback to finding any scrollable element
     const allElements = document.querySelectorAll('*');
     const scrollableElements: HTMLElement[] = [];
 
@@ -355,15 +393,6 @@ export class MonitorService {
 
         if (hasVisibleScrollbar) {
           scrollableElements.push(element);
-          this.log('Found scrollable element', {
-            className: element.className,
-            id: element.id,
-            scrollHeight: element.scrollHeight,
-            clientHeight: element.clientHeight,
-            overflowY: style.overflowY,
-            display: style.display,
-            position: style.position,
-          });
         }
       }
     }
@@ -374,17 +403,16 @@ export class MonitorService {
     );
 
     for (const element of scrollableElements) {
-      // Try a simple scroll first
       const beforeScroll = element.scrollTop;
       element.scrollTop = Math.max(0, element.scrollTop - this.AUTO_SCROLL_STEP);
       await this.nextTick();
 
       if (element.scrollTop !== beforeScroll) {
-        this.log('Found working scroll element', {
+        this.log('Found fallback scrollable element', {
           className: element.className,
           id: element.id,
-          beforeScroll,
-          afterScroll: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
         });
         return element;
       }
@@ -399,61 +427,84 @@ export class MonitorService {
     const el = element;
     const beforeMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
-    // Log initial state
-    this.log('Attempting scroll on element', {
-      className: el.className,
-      id: el.id,
-      scrollTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      offsetHeight: el.offsetHeight,
-    });
-
     try {
-      // Simple direct scroll
-      const beforeScroll = el.scrollTop;
-      el.scrollTop = Math.max(0, el.scrollTop - amount);
-      await this.nextTick();
+      // Try each scroll method sequentially instead of in parallel
+      const scrollMethods = [
+        // Method 1: Direct scroll with style reset
+        async (): Promise<boolean> => {
+          const beforeScroll = el.scrollTop;
+          const originalStyle = el.style.cssText;
 
-      const didScroll = el.scrollTop !== beforeScroll;
-      if (didScroll) {
-        this.lastScrollTime = Date.now(); // Update last scroll time on successful scroll
-      }
-      this.log('Scroll attempt', {
-        didScroll,
-        beforeScroll,
-        afterScroll: el.scrollTop,
-      });
+          el.style.cssText = `
+            scroll-behavior: auto !important;
+            overflow-y: scroll !important;
+            height: ${el.clientHeight}px !important;
+            max-height: ${el.clientHeight}px !important;
+          `;
 
-      if (!didScroll) {
-        // If direct scroll failed, try scrollIntoView on first unextracted message
-        const unextractedMessage = el.querySelector(
-          `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
-        );
-        if (unextractedMessage instanceof HTMLElement) {
-          const beforeScrollIntoView = el.scrollTop;
-          unextractedMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
+          el.scrollTop = Math.max(0, el.scrollTop - amount);
           await this.nextTick();
-          const didScrollIntoView = el.scrollTop !== beforeScrollIntoView;
+          const didScroll = el.scrollTop !== beforeScroll;
 
-          this.log('ScrollIntoView attempt', {
-            didScroll: didScrollIntoView,
-            beforeScroll: beforeScrollIntoView,
-            afterScroll: el.scrollTop,
-          });
+          // Restore original style
+          el.style.cssText = originalStyle;
 
-          if (didScrollIntoView) return true;
+          if (didScroll) {
+            this.lastScrollTime = Date.now();
+          }
+
+          return didScroll;
+        },
+
+        // Method 2: ScrollIntoView on unextracted message
+        async (): Promise<boolean> => {
+          const unextractedMessage = el.querySelector(
+            `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
+          );
+
+          if (unextractedMessage instanceof HTMLElement) {
+            const beforeScroll = el.scrollTop;
+            unextractedMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
+            await this.nextTick();
+            const didScroll = el.scrollTop !== beforeScroll;
+
+            if (didScroll) {
+              this.lastScrollTime = Date.now();
+            }
+
+            return didScroll;
+          }
+          return false;
+        },
+
+        // Method 3: Force scroll with multiplier
+        async (): Promise<boolean> => {
+          const beforeScroll = el.scrollTop;
+          el.scrollTop = Math.max(0, el.scrollTop - amount * this.FORCE_SCROLL_MULTIPLIER);
+          await this.nextTick();
+          const didScroll = el.scrollTop !== beforeScroll;
+
+          if (didScroll) {
+            this.lastScrollTime = Date.now();
+          }
+
+          return didScroll;
+        },
+      ];
+
+      // Try each method sequentially until one works
+      for (const method of scrollMethods) {
+        const didScroll = await method();
+        if (didScroll) {
+          // Give DOM time to update after successful scroll
+          await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
+          return true;
         }
       }
 
-      // Wait for content to load
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Check for new messages
+      // Check if we got new messages even if scrolling appeared to fail
       const afterMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
-      const messageCountChanged = afterMessageCount > beforeMessageCount;
-
-      return didScroll || messageCountChanged;
+      return afterMessageCount > beforeMessageCount;
     } catch (error) {
       this.log('Error during scroll attempt', {
         element: el.className,
@@ -465,9 +516,13 @@ export class MonitorService {
 
   private async waitForNewMessages(currentCount: number): Promise<boolean> {
     const startTime = Date.now();
+    let lastCount = currentCount;
+    let noChangeCount = 0;
+    const MAX_NO_CHANGE = 3;
 
     while (Date.now() - startTime < this.MAX_WAIT_FOR_MESSAGES_MS) {
       const newCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
+
       if (newCount > currentCount) {
         this.log('Found new messages', {
           beforeCount: currentCount,
@@ -476,7 +531,25 @@ export class MonitorService {
         });
         return true;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (newCount === lastCount) {
+        noChangeCount++;
+        if (noChangeCount >= MAX_NO_CHANGE) {
+          // If count hasn't changed for several checks, try forcing a scroll
+          const scrollableElement = await this.findAndScrollElement();
+          if (scrollableElement instanceof HTMLElement) {
+            await this.attemptScrollOnElement(
+              scrollableElement,
+              this.AUTO_SCROLL_STEP * this.FORCE_SCROLL_MULTIPLIER,
+            );
+          }
+        }
+      } else {
+        noChangeCount = 0;
+      }
+
+      lastCount = newCount;
+      await new Promise((resolve) => setTimeout(resolve, 50)); // Faster polling
     }
 
     this.log('Timed out waiting for new messages', {
@@ -492,17 +565,16 @@ export class MonitorService {
       return;
     }
 
-    this.lastScrollTime = Date.now();
     this.isAutoScrolling = true;
     this.scrollAttempts = 0;
     let consecutiveNoNewMessages = 0;
-    const MAX_NO_NEW_MESSAGES = 3;
 
     try {
       while (this.scrollAttempts < this.MAX_SCROLL_ATTEMPTS && this.isAutoScrolling) {
-        // Wait for any ongoing extraction to complete
-        while (this.isExtracting) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
+        // Quick check for ongoing extraction
+        if (this.isExtracting) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          continue;
         }
 
         const beforeMessageCount = document.querySelectorAll(
@@ -511,8 +583,9 @@ export class MonitorService {
         const scrollableElement = await this.findAndScrollElement();
 
         if (!scrollableElement) {
-          this.log('No scrollable element found');
-          break;
+          this.log('No scrollable element found, retrying...');
+          await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
+          continue;
         }
 
         this.log('Scrolling attempt', {
@@ -529,11 +602,22 @@ export class MonitorService {
         );
 
         if (!scrolled) {
-          this.log('Failed to scroll element');
-          break;
+          consecutiveNoNewMessages++;
+          this.log('Failed to scroll', { consecutiveNoNewMessages });
+
+          if (consecutiveNoNewMessages >= this.MAX_CONSECUTIVE_FAILURES) {
+            this.log('Too many consecutive failures, stopping');
+            break;
+          }
+
+          // Try a more aggressive scroll
+          await this.attemptScrollOnElement(
+            scrollableElement,
+            this.AUTO_SCROLL_STEP * this.FORCE_SCROLL_MULTIPLIER,
+          );
         }
 
-        // Wait for content to load and DOM to update
+        // Quick pause for content load
         await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
 
         // Extract any new messages
@@ -544,25 +628,18 @@ export class MonitorService {
         // Wait for new messages with timeout
         const gotNewMessages = await this.waitForNewMessages(beforeMessageCount);
 
-        if (!gotNewMessages) {
-          consecutiveNoNewMessages++;
-          this.log('No new messages after scroll and wait', {
-            consecutiveNoNewMessages,
-            beforeCount: beforeMessageCount,
-          });
-
-          if (consecutiveNoNewMessages >= MAX_NO_NEW_MESSAGES) {
-            this.log('Stopping scroll due to no new messages');
-            break;
-          }
-        } else {
+        if (gotNewMessages) {
           consecutiveNoNewMessages = 0;
-          // Small pause after successful message fetch
+          // Minimal pause after success
           await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS / 2));
         }
 
         this.scrollAttempts++;
       }
+    } catch (error) {
+      this.log('Error during auto-scroll', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     } finally {
       this.isAutoScrolling = false;
       this.log('Auto-scroll complete', {
