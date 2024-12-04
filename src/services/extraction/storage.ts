@@ -269,6 +269,9 @@ export class StorageService {
 
   private updateTimeRanges(messages: MessagesByOrganization): ExtractedTimeRanges {
     const timeRanges: ExtractedTimeRanges = {};
+    const TWENTY_MINUTES_MS = 20 * 60 * 1000; // 20 minutes in milliseconds
+    const MAX_RANGES = 30;
+    const RANGES_TO_MERGE = 8;
 
     for (const [org, orgData] of Object.entries(messages)) {
       timeRanges[org] = {};
@@ -287,8 +290,8 @@ export class StorageService {
 
           if (!currentRange) {
             currentRange = { start: timestamp, end: timestamp };
-          } else if (timestamp - currentRange.end <= 60000) {
-            // Within 1 minute
+          } else if (timestamp - currentRange.end <= TWENTY_MINUTES_MS) {
+            // Extend current range if message is within 20 minutes
             currentRange.end = timestamp;
           } else {
             ranges.push(currentRange);
@@ -300,7 +303,7 @@ export class StorageService {
           ranges.push(currentRange);
         }
 
-        // Merge overlapping ranges
+        // Merge any overlapping ranges or ranges within 20 minutes of each other
         if (ranges.length > 0) {
           const mergedRanges: TimeRange[] = [ranges[0]];
 
@@ -308,11 +311,28 @@ export class StorageService {
             const current = ranges[i];
             const previous = mergedRanges[mergedRanges.length - 1];
 
-            if (current.start - previous.end <= 60000) {
+            if (current.start - previous.end <= TWENTY_MINUTES_MS) {
+              // Merge ranges if they're within 20 minutes of each other
               previous.end = Math.max(previous.end, current.end);
             } else {
               mergedRanges.push(current);
             }
+          }
+
+          // If we have too many ranges, merge some in the middle
+          if (mergedRanges.length > MAX_RANGES) {
+            const midPoint = Math.floor(mergedRanges.length / 2);
+            const startMergeIndex = midPoint - Math.floor(RANGES_TO_MERGE / 2);
+            const endMergeIndex = startMergeIndex + RANGES_TO_MERGE;
+
+            // Create a merged range from the middle ranges
+            const middleRange = {
+              start: mergedRanges[startMergeIndex].start,
+              end: mergedRanges[endMergeIndex - 1].end,
+            };
+
+            // Replace the middle ranges with the merged range
+            mergedRanges.splice(startMergeIndex, RANGES_TO_MERGE, middleRange);
           }
 
           timeRanges[org][channel] = mergedRanges;
