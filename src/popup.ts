@@ -1,8 +1,10 @@
 import { StorageService } from './services/extraction/storage';
+import { format } from 'date-fns';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const storageService = new StorageService();
   const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement;
+  const downloadButton = document.getElementById('downloadButton') as HTMLButtonElement;
   const statusIndicator = document.getElementById('statusIndicator') as HTMLDivElement;
   const statusText = document.getElementById('statusText') as HTMLSpanElement;
   const messageCount = document.getElementById('messageCount') as HTMLSpanElement;
@@ -10,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const scrollingToggle = document.getElementById('scrollingToggle') as HTMLInputElement;
 
   let isExtracting = false;
+  let totalMessages = 0;
 
   // Initialize UI state
   const initializeState = async (): Promise<void> => {
@@ -23,12 +26,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       channelInfo.textContent = `${state.currentChannel.organization} / ${state.currentChannel.channel}`;
     }
 
-    const totalMessages = Object.values(state.extractedMessages)
+    totalMessages = Object.values(state.extractedMessages)
       .flatMap((org) => Object.values(org))
       .flatMap((channel) => Object.values(channel))
       .reduce((acc, messages) => acc + messages.length, 0);
 
     messageCount.textContent = totalMessages.toString();
+    downloadButton.disabled = totalMessages === 0;
   };
 
   // Update UI based on state
@@ -36,7 +40,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     toggleButton.textContent = isExtracting ? 'Stop Extraction' : 'Start Extraction';
     statusIndicator.classList.toggle('active', isExtracting);
     statusText.textContent = isExtracting ? 'Extracting messages...' : 'Idle';
+    downloadButton.disabled = totalMessages === 0;
   };
+
+  // Handle download
+  downloadButton.addEventListener('click', async () => {
+    const state = await storageService.loadState();
+    const messages = state.extractedMessages;
+
+    // Create a formatted timestamp for the filename
+    const timestamp = format(new Date(), 'yyyy-MM-dd-HH-mm');
+    const filename = `slack-messages-${timestamp}.json`;
+
+    // Create a download link
+    const blob = new Blob([JSON.stringify(messages, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+
+    // Cleanup
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  });
 
   // Handle extraction toggle
   toggleButton.addEventListener('click', async () => {
@@ -74,7 +104,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (message.currentChannel) {
         channelInfo.textContent = `${message.currentChannel.organization} / ${message.currentChannel.channel}`;
       }
-      messageCount.textContent = message.messageCount.toString();
+      totalMessages = message.messageCount;
+      messageCount.textContent = totalMessages.toString();
       updateUI();
     }
   });
