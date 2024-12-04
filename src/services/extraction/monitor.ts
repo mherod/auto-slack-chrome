@@ -192,26 +192,32 @@ export class MonitorService {
     messageCount: number;
     extractedMessages: MessagesByOrganization;
   } {
+    const messageCount = Object.values(this.extractedMessages)
+      .reduce<number[]>((acc, org) => {
+        const orgValues = Object.values(org);
+        const channelValues = orgValues.flatMap((channel) => Object.values(channel));
+        const messageLengths = channelValues.flatMap((messages) => messages.length);
+        return acc.concat(messageLengths);
+      }, [])
+      .reduce((acc, count) => acc + count, 0);
+
     return {
-      isExtracting: this.observer !== null,
+      isExtracting: Boolean(this.observer),
       channelInfo: this.currentChannelInfo,
-      messageCount: Object.values(this.extractedMessages)
-        .flatMap((org) => Object.values(org))
-        .flatMap((channel) => Object.values(channel))
-        .reduce((acc, messages) => acc + messages.length, 0),
+      messageCount,
       extractedMessages: this.extractedMessages,
     };
   }
 
   private setupScrollHandler(): void {
     const container = this.messageExtractor.getMessageContainer();
-    if (container !== null) {
+    if (container instanceof Element) {
       container.addEventListener('scroll', this.handleScroll);
     }
   }
 
   private handleScroll = (): void => {
-    if (this.scrollTimeout !== null) {
+    if (typeof this.scrollTimeout === 'number') {
       window.clearTimeout(this.scrollTimeout);
     }
 
@@ -219,7 +225,7 @@ export class MonitorService {
     if (this.isAutoScrolling) return;
 
     // Disconnect observer during scroll
-    if (this.observer !== null) {
+    if (this.observer instanceof MutationObserver) {
       this.observer.disconnect();
     }
 
@@ -877,9 +883,51 @@ export class MonitorService {
 
   public setScrollingEnabled(enabled: boolean): void {
     this.log('Setting auto-scroll enabled state', { enabled });
-    if (!enabled && this.isAutoScrolling) {
+    if (!enabled && Boolean(this.isAutoScrolling)) {
       this.isAutoScrolling = false;
       this.log('Stopping auto-scroll due to preference change');
     }
+  }
+
+  private addMessage(organization: string, channel: string, message: SlackMessage): void {
+    const messageDate = startOfDay(new Date(message.timestamp ?? new Date())).toISOString();
+
+    // Initialize organization if it doesn't exist
+    if (!(organization in this.extractedMessages)) {
+      this.extractedMessages[organization] = {};
+    }
+
+    // Initialize channel if it doesn't exist
+    if (!(channel in this.extractedMessages[organization])) {
+      this.extractedMessages[organization][channel] = {};
+    }
+
+    // Initialize date if it doesn't exist
+    if (!(messageDate in this.extractedMessages[organization][channel])) {
+      this.extractedMessages[organization][channel][messageDate] = [];
+    }
+
+    const messages = this.extractedMessages[organization][channel][messageDate];
+    const existingIndex = messages.findIndex(
+      (m: SlackMessage) => m.messageId === message.messageId,
+    );
+
+    if (existingIndex >= 0) {
+      // Update existing message if new info is available
+      messages[existingIndex] = {
+        ...messages[existingIndex],
+        ...message,
+      };
+    } else {
+      // Add new message
+      messages.push(message);
+    }
+
+    // Sort messages by timestamp
+    messages.sort((a: SlackMessage, b: SlackMessage) => {
+      const timeA = new Date(a.timestamp ?? 0).getTime();
+      const timeB = new Date(b.timestamp ?? 0).getTime();
+      return timeA - timeB;
+    });
   }
 }

@@ -29,13 +29,13 @@ export class StorageService {
     const data = await chrome.storage.local.get([this.STORAGE_KEY, this.LEGACY_KEY]);
 
     // Try loading from new storage key first
-    if (data[this.STORAGE_KEY]) {
+    if (this.STORAGE_KEY in data && data[this.STORAGE_KEY] !== null) {
       const state = StorageStateSchema.parse(data[this.STORAGE_KEY]);
       return state;
     }
 
     // Fall back to legacy storage
-    if (data[this.LEGACY_KEY]) {
+    if (this.LEGACY_KEY in data && data[this.LEGACY_KEY] !== null) {
       const legacyState = data[this.LEGACY_KEY];
       // Migrate legacy state to new format
       const migratedState = {
@@ -177,8 +177,8 @@ export class StorageService {
                 existing.sender === newMessage.sender &&
                 existing.senderId === newMessage.senderId &&
                 // Only match if we have valid timestamps
-                existing.timestamp !== null &&
-                newMessage.timestamp !== null &&
+                typeof existing.timestamp === 'string' &&
+                typeof newMessage.timestamp === 'string' &&
                 // Compare timestamps without milliseconds for deduplication
                 new Date(existing.timestamp).setMilliseconds(0) ===
                   new Date(newMessage.timestamp).setMilliseconds(0),
@@ -197,7 +197,9 @@ export class StorageService {
                   // Preserve the original messageId if it exists
                   messageId: existingMessage.messageId ?? newMessage.messageId,
                   // Keep the more accurate sender information
-                  isInferredSender: newMessage.isInferredSender && existingMessage.isInferredSender,
+                  isInferredSender: Boolean(
+                    newMessage.isInferredSender && existingMessage.isInferredSender,
+                  ),
                   sender: !newMessage.isInferredSender
                     ? newMessage.sender
                     : !existingMessage.isInferredSender
@@ -218,8 +220,8 @@ export class StorageService {
 
           // Sort messages by timestamp
           result[org][channel][date].sort((a, b) => {
-            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            const timeA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : 0;
+            const timeB = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : 0;
             return timeA - timeB;
           });
         }

@@ -19,7 +19,7 @@
     "build": "webpack --config webpack.config.cjs",
     "watch": "cross-env WEBPACK_WATCH=true webpack --config webpack.config.cjs --watch",
     "type-check": "tsc --noEmit",
-    "lint": "eslint --config eslint.config.cjs src/**/*.ts",
+    "lint": "pnpm type-check && eslint --config eslint.config.cjs src/**/*.ts",
     "lint:fix": "eslint --config eslint.config.cjs src/**/*.ts --fix",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "test": "echo \"Error: no test specified\" && exit 1",

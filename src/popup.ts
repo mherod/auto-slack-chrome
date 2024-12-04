@@ -17,9 +17,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   let isLoading = true;
 
   const setError = (message: string): void => {
-    statusText.textContent = message;
-    statusIndicator.style.backgroundColor = '#dc3545';
-    setLoading(false);
+    const errorElement = document.getElementById('error');
+    if (errorElement instanceof HTMLElement) {
+      errorElement.textContent = message;
+      errorElement.style.display = 'block';
+    }
   };
 
   const findSlackTab = async (): Promise<chrome.tabs.Tab | null> => {
@@ -33,7 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return null;
     }
     const tab = tabs[0];
-    if (!tab.id) {
+    if (typeof tab.id !== 'number' || tab.id <= 0) {
       setError('Invalid tab state');
       return null;
     }
@@ -43,12 +45,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sendMessageToTab = async (message: unknown): Promise<void> => {
     try {
       const tab = await findSlackTab();
-      if (!tab?.id) return;
+      if (typeof tab?.id !== 'number' || tab.id <= 0) return;
 
       await chrome.tabs.sendMessage(tab.id, message);
     } catch (error) {
       console.error('Failed to send message to tab:', error);
-      if (error instanceof Error && error.message.includes('Could not establish connection')) {
+      if (
+        error instanceof Error &&
+        typeof error.message === 'string' &&
+        error.message.includes('Could not establish connection')
+      ) {
         setError('Please refresh the Slack tab');
       } else {
         setError('Failed to communicate with Slack');
@@ -70,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageCount.classList.remove('skeleton');
       channelInfo.classList.remove('skeleton');
       toggleButton.disabled = false;
-      downloadButton.disabled = totalMessages === 0;
+      downloadButton.disabled = totalMessages <= 0;
     }
   };
 
@@ -88,13 +94,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Check for valid Slack tab first
       const tab = await findSlackTab();
-      if (!tab) return;
+      if (typeof tab === 'undefined' || tab === null) return;
 
       const state = await storageService.loadState();
       isExtracting = state.isExtracting;
-      scrollingToggle.checked = state.isScrollingEnabled;
+      scrollingToggle.checked = Boolean(state.isScrollingEnabled);
 
-      if (state.currentChannel) {
+      if (typeof state.currentChannel === 'object' && state.currentChannel !== null) {
         channelInfo.textContent = formatChannelInfo(
           state.currentChannel.organization,
           state.currentChannel.channel,
@@ -112,7 +118,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateUI();
     } catch (error) {
       console.error('Failed to initialize state:', error);
-      setError('Failed to initialize');
+      if (error instanceof Error && typeof error.message === 'string') {
+        setError(`Failed to initialize: ${error.message}`);
+      } else if (
+        error !== null &&
+        typeof error === 'object' &&
+        'message' in error &&
+        typeof error.message === 'string'
+      ) {
+        setError(`Failed to initialize: ${error.message}`);
+      } else {
+        setError('Failed to initialize');
+      }
     } finally {
       setLoading(false);
     }
@@ -121,9 +138,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Update UI based on state
   const updateUI = (): void => {
     toggleButton.textContent = isExtracting ? 'Stop Extraction' : 'Start Extraction';
-    statusIndicator.classList.toggle('active', isExtracting);
+    statusIndicator.classList.toggle('active', Boolean(isExtracting));
     statusText.textContent = isExtracting ? 'Extracting messages...' : 'Idle';
-    downloadButton.disabled = isLoading || totalMessages === 0;
+    downloadButton.disabled = isLoading || totalMessages <= 0;
     toggleButton.disabled = isLoading;
   };
 
@@ -179,12 +196,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   scrollingToggle.addEventListener('change', async () => {
     try {
       setLoading(true);
-      await storageService.setScrollingEnabled(scrollingToggle.checked);
+      const newState = scrollingToggle.checked;
 
       await sendMessageToTab({
         type: 'SET_SCROLLING_ENABLED',
-        enabled: scrollingToggle.checked,
+        enabled: newState,
       });
+
+      await storageService.setScrollingEnabled(newState);
     } catch (error) {
       console.error('Failed to toggle scrolling:', error);
       scrollingToggle.checked = !scrollingToggle.checked; // Revert state on error

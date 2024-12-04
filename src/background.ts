@@ -82,7 +82,7 @@ const createInitialState = (
 const cleanupTabs = (): void => {
   const now = Date.now();
   for (const [tabId, state] of tabStates.entries()) {
-    if (now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    if (typeof state.lastHeartbeat === 'number' && now - state.lastHeartbeat > HEARTBEAT_TIMEOUT) {
       tabStates.delete(tabId);
     }
   }
@@ -90,23 +90,23 @@ const cleanupTabs = (): void => {
 
 const broadcastStateUpdate = (tabId: number): void => {
   const tabState = tabStates.get(tabId);
-  if (!tabState?.state) return;
+  if (typeof tabState?.state === 'object' && tabState.state !== null) {
+    const message: OutgoingMessage = {
+      type: 'state_update',
+      timestamp: Date.now(),
+      state: tabState.state,
+    };
 
-  const message: OutgoingMessage = {
-    type: 'state_update',
-    timestamp: Date.now(),
-    state: tabState.state,
-  };
-
-  void chrome.runtime.sendMessage(message).catch(() => {
-    // Ignore chrome.runtime errors when context is invalidated
-  });
+    void chrome.runtime.sendMessage(message).catch(() => {
+      // Ignore chrome.runtime errors when context is invalidated
+    });
+  }
 };
 
 const reloadSlackTabs = async (): Promise<void> => {
   const tabs = await chrome.tabs.query({ url: 'https://app.slack.com/*' });
   for (const tab of tabs) {
-    if (tab.id) {
+    if (typeof tab.id === 'number' && tab.id > 0) {
       void chrome.tabs.reload(tab.id);
     }
   }
@@ -128,7 +128,7 @@ const handleHeartbeat = (
     tabStates.set(tabId, tabState);
   } else {
     tabState.lastHeartbeat = timestamp;
-    if (tabState.state) {
+    if (typeof tabState.state === 'object' && tabState.state !== null) {
       tabState.state.isExtracting = status.isExtracting;
       tabState.state.currentChannel = status.channelInfo;
     }
@@ -154,7 +154,7 @@ const handleSync = (
     tabStates.set(tabId, tabState);
   } else {
     tabState.lastHeartbeat = timestamp;
-    if (tabState.state) {
+    if (typeof tabState.state === 'object' && tabState.state !== null) {
       tabState.state.currentChannel = data.currentChannel;
       tabState.state.extractedMessages = data.extractedMessages;
     }
@@ -169,7 +169,11 @@ const handlePopupStatus = (
   sendResponse: (response: { state: BackgroundState | null }) => void,
 ): void => {
   const tabState = tabStates.get(message.tabId);
-  sendResponse({ state: tabState?.state ?? null });
+  if (typeof tabState?.state === 'object' && tabState.state !== null) {
+    sendResponse({ state: tabState.state });
+  } else {
+    sendResponse({ state: null });
+  }
 };
 
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse): boolean => {
@@ -183,7 +187,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
     }
 
     // For other message types, ensure we have a valid tab ID
-    if (tabId === undefined || tabId === 0) {
+    if (typeof tabId !== 'number' || tabId <= 0) {
       console.error('No valid tab ID for message:', message.type);
       sendResponse({ success: false, error: 'No valid tab ID' });
       return false;
@@ -196,6 +200,9 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
       case 'sync':
         handleSync(message, tabId, sendResponse);
         break;
+      default:
+        console.error('Unknown message type:', message.type);
+        sendResponse({ success: false, error: 'Unknown message type' });
     }
   } catch (error) {
     console.error('Error handling message:', error);

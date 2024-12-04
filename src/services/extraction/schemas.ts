@@ -1,28 +1,35 @@
 import { z } from 'zod';
 
-export const CustomStatusSchema = z.object({
-  emoji: z.string().nullable(),
-  emojiUrl: z.string().nullable(),
-});
+export const CustomStatusSchema = z
+  .object({
+    emoji: z.string().nullable(),
+    emojiUrl: z.string().nullable(),
+  })
+  .strict();
 
-export const AttachmentImageSchema = z.object({
-  url: z.string(),
-  thumbnailUrl: z.string().nullable(),
-  alt: z.string().nullable(),
-});
+export const AttachmentImageSchema = z
+  .object({
+    url: z.string(),
+    thumbnailUrl: z.string().nullable(),
+    alt: z.string().nullable(),
+  })
+  .strict();
 
-export const AttachmentSchema = z.object({
-  type: z.string(),
-  title: z.string().nullable(),
-  text: z.string().nullable(),
-  authorName: z.string().nullable(),
-  authorIcon: z.string().nullable(),
-  footerText: z.string().nullable(),
-  timestamp: z.string().nullable(),
-  permalink: z.string().nullable(),
-  images: z.array(AttachmentImageSchema).nullable(),
-});
+export const AttachmentSchema = z
+  .object({
+    type: z.string(),
+    title: z.string().nullable(),
+    text: z.string().nullable(),
+    authorName: z.string().nullable(),
+    authorIcon: z.string().nullable(),
+    footerText: z.string().nullable(),
+    timestamp: z.string().nullable(),
+    permalink: z.string().nullable(),
+    images: z.array(AttachmentImageSchema).nullable(),
+  })
+  .strict();
 
+// Pre-compile the message schema for better performance
 export const SlackMessageSchema = z
   .object({
     sender: z.string().nullable(),
@@ -34,64 +41,86 @@ export const SlackMessageSchema = z
     avatarUrl: z.string().nullable(),
     messageId: z.string().nullable(),
     isInferredSender: z.boolean().default(false),
-  })
-  .extend({
     attachments: z.array(AttachmentSchema).optional(),
-  });
+  })
+  .strict();
 
-export const ChannelInfoSchema = z.object({
-  channel: z.string(),
-  organization: z.string(),
-});
+export const ChannelInfoSchema = z
+  .object({
+    channel: z.string(),
+    organization: z.string(),
+  })
+  .strict();
 
-export const MessagesByDateSchema = z.record(z.string(), z.array(SlackMessageSchema));
+// Use precompiled array schema for better performance
+const SlackMessageArraySchema = z.array(SlackMessageSchema);
+
+export const MessagesByDateSchema = z.record(z.string(), SlackMessageArraySchema);
 export const MessagesByChannelSchema = z.record(z.string(), MessagesByDateSchema);
 export const MessagesByOrganizationSchema = z.record(z.string(), MessagesByChannelSchema);
 
-export const ExtensionStateSchema = z.object({
-  isExtracting: z.boolean(),
-  currentChannel: ChannelInfoSchema.nullable(),
-  extractedMessages: MessagesByOrganizationSchema,
-});
-
-export const LastKnownSenderSchema = z.object({
-  sender: z.string(),
-  senderId: z.string(),
-  avatarUrl: z.string().nullable(),
-  customStatus: CustomStatusSchema.nullable(),
-});
-
-export const SenderInfoSchema = z.object({
-  sender: z.string().nullable(),
-  senderId: z.string().nullable(),
-  avatarUrl: z.string().nullable(),
-  customStatus: CustomStatusSchema.nullable(),
-  isInferred: z.boolean(),
-});
-
-export const HeartbeatMessageSchema = z.object({
-  type: z.literal('heartbeat'),
-  timestamp: z.number(),
-  status: z.object({
+export const ExtensionStateSchema = z
+  .object({
     isExtracting: z.boolean(),
-    channelInfo: ChannelInfoSchema.nullable(),
-    messageCount: z.number(),
-  }),
-});
-
-export const SyncMessageSchema = z.object({
-  type: z.literal('sync'),
-  timestamp: z.number(),
-  data: z.object({
-    extractedMessages: MessagesByOrganizationSchema,
     currentChannel: ChannelInfoSchema.nullable(),
-  }),
-});
+    extractedMessages: MessagesByOrganizationSchema,
+  })
+  .strict();
 
-export const ExtractionControlMessageSchema = z.object({
-  type: z.union([z.literal('START_EXTRACTION'), z.literal('STOP_EXTRACTION')]),
-});
+export const LastKnownSenderSchema = z
+  .object({
+    sender: z.string(),
+    senderId: z.string(),
+    avatarUrl: z.string().nullable(),
+    customStatus: CustomStatusSchema.nullable(),
+  })
+  .strict();
 
+export const SenderInfoSchema = z
+  .object({
+    sender: z.string().nullable(),
+    senderId: z.string().nullable(),
+    avatarUrl: z.string().nullable(),
+    customStatus: CustomStatusSchema.nullable(),
+    isInferred: z.boolean(),
+  })
+  .strict();
+
+// Message schemas with strict validation
+export const HeartbeatMessageSchema = z
+  .object({
+    type: z.literal('heartbeat'),
+    timestamp: z.number(),
+    status: z
+      .object({
+        isExtracting: z.boolean(),
+        channelInfo: ChannelInfoSchema.nullable(),
+        messageCount: z.number(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const SyncMessageSchema = z
+  .object({
+    type: z.literal('sync'),
+    timestamp: z.number(),
+    data: z
+      .object({
+        extractedMessages: MessagesByOrganizationSchema,
+        currentChannel: ChannelInfoSchema.nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ExtractionControlMessageSchema = z
+  .object({
+    type: z.union([z.literal('START_EXTRACTION'), z.literal('STOP_EXTRACTION')]),
+  })
+  .strict();
+
+// Pre-compile union types for better performance
 export const ContentScriptMessageSchema = z.union([HeartbeatMessageSchema, SyncMessageSchema]);
 export const IncomingMessageSchema = z.union([
   ContentScriptMessageSchema,
