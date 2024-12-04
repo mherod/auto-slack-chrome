@@ -515,12 +515,26 @@ export class MonitorService {
   }
 
   private async waitForNewMessages(currentCount: number): Promise<boolean> {
+    // Check if auto-scroll is still enabled
+    const state = await this.storageService.loadState();
+    if (!state.isScrollingEnabled) {
+      this.log('Auto-scroll was disabled while waiting for messages');
+      return false;
+    }
+
     const startTime = Date.now();
     let lastCount = currentCount;
     let noChangeCount = 0;
     const MAX_NO_CHANGE = 3;
 
     while (Date.now() - startTime < this.MAX_WAIT_FOR_MESSAGES_MS) {
+      // Check if auto-scroll was disabled while waiting
+      const currentState = await this.storageService.loadState();
+      if (!currentState.isScrollingEnabled) {
+        this.log('Auto-scroll was disabled while waiting for messages');
+        return false;
+      }
+
       const newCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
       if (newCount > currentCount) {
@@ -560,6 +574,13 @@ export class MonitorService {
   }
 
   private async autoScroll(): Promise<void> {
+    // Check if auto-scroll is enabled in storage
+    const state = await this.storageService.loadState();
+    if (!state.isScrollingEnabled) {
+      this.log('Auto-scroll is disabled in storage, skipping');
+      return;
+    }
+
     if (this.isAutoScrolling) {
       this.log('Already auto-scrolling, skipping');
       return;
@@ -571,6 +592,13 @@ export class MonitorService {
 
     try {
       while (this.scrollAttempts < this.MAX_SCROLL_ATTEMPTS && this.isAutoScrolling) {
+        // Check if auto-scroll was disabled while running
+        const currentState = await this.storageService.loadState();
+        if (!currentState.isScrollingEnabled) {
+          this.log('Auto-scroll was disabled while running, stopping');
+          break;
+        }
+
         // Quick check for ongoing extraction
         if (this.isExtracting) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -847,15 +875,11 @@ export class MonitorService {
     }, this.POLLING_INTERVAL_MS);
   }
 
-  public async setScrollingEnabled(enabled: boolean): Promise<void> {
-    await this.storageService.setScrollingEnabled(enabled);
-
-    if (enabled && !this.isAutoScrolling) {
-      // Start scrolling if it's not already running
-      await this.autoScroll();
-    } else if (!enabled) {
-      // Stop scrolling
+  public setScrollingEnabled(enabled: boolean): void {
+    this.log('Setting auto-scroll enabled state', { enabled });
+    if (!enabled && this.isAutoScrolling) {
       this.isAutoScrolling = false;
+      this.log('Stopping auto-scroll due to preference change');
     }
   }
 }
