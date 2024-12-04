@@ -11,7 +11,6 @@ import {
 export class MessageExtractor {
   private lastKnownSender: LastKnownSender | null = null;
   private EXTRACTED_ATTRIBUTE = 'data-extracted';
-  private RANGE_ATTRIBUTE = 'data-in-range';
 
   private log(message: string, data?: unknown): void {
     console.log(`[Slack Extractor] ${message}`, data ?? '');
@@ -521,15 +520,6 @@ export class MessageExtractor {
     // Add the extracted attribute
     element.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
 
-    // Set range attribute if provided
-    if (typeof isInRange === 'boolean') {
-      if (isInRange) {
-        element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
-      } else {
-        element.removeAttribute(this.RANGE_ATTRIBUTE);
-      }
-    }
-
     // Find the timestamp element - try multiple selectors for different message formats
     const timestampElement = element.querySelector(
       '[data-ts], .c-timestamp, .c-message_kit__timestamp',
@@ -557,14 +547,6 @@ export class MessageExtractor {
   }
 
   public updateRangeIndicator(element: Element, isInRange: boolean): void {
-    // Update range attribute
-    if (isInRange) {
-      element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
-    } else {
-      element.removeAttribute(this.RANGE_ATTRIBUTE);
-    }
-
-    // Update text indicator
     const timestampElement = element.querySelector(
       '[data-ts], .c-timestamp, .c-message_kit__timestamp',
     );

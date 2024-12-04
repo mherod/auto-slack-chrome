@@ -51,30 +51,6 @@ export class MonitorService {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-      [${this.RANGE_ATTRIBUTE}="true"] {
-        position: relative;
-        background-color: rgba(54, 197, 171, 0.05);
-      }
-
-      [${this.RANGE_ATTRIBUTE}="true"]::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 4px;
-        background-color: rgba(54, 197, 171, 0.6);
-        pointer-events: none;
-      }
-
-      [${this.RANGE_ATTRIBUTE}="true"][${this.EXTRACTED_ATTRIBUTE}="true"] {
-        background-color: rgba(54, 197, 171, 0.1);
-      }
-
-      [${this.RANGE_ATTRIBUTE}="true"][${this.EXTRACTED_ATTRIBUTE}="true"]::before {
-        background-color: rgba(54, 197, 171, 0.8);
-      }
-
       .saved-indicator {
         margin-left: 6px;
         color: var(--sk_foreground_max_solid, #4a154b);
@@ -1009,13 +985,6 @@ export class MonitorService {
       this.currentChannelInfo.channel,
       messageTime,
     );
-
-    // Set or remove the range attribute
-    if (isInRange) {
-      element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
-    } else {
-      element.removeAttribute(this.RANGE_ATTRIBUTE);
-    }
 
     // Update the text indicator if the message is already extracted
     if (this.messageExtractor.isMessageExtracted(element)) {
