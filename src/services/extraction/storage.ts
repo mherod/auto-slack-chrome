@@ -22,6 +22,7 @@ export class StorageService {
   private readonly STORAGE_KEY = 'slack-extractor-state';
   private readonly LEGACY_KEY = 'extensionState';
   private readonly METRICS_KEY = 'storage-metrics';
+  private readonly MIGRATION_COMPLETE_KEY = 'migration-complete';
   private cachedState: StorageState | null = null;
   private pendingWrites: Array<() => Promise<void>> = [];
   private writeTimeout: number | null = null;
@@ -87,9 +88,47 @@ export class StorageService {
     }
   }
 
+  private async migrateFromLegacy(): Promise<void> {
+    const migrationComplete = await chrome.storage.local.get(this.MIGRATION_COMPLETE_KEY);
+    if (migrationComplete[this.MIGRATION_COMPLETE_KEY]) {
+      return;
+    }
+
+    const data = await chrome.storage.local.get([this.LEGACY_KEY, 'allMessages']);
+
+    if (data[this.LEGACY_KEY]) {
+      const legacyState = data[this.LEGACY_KEY];
+      const migratedState = {
+        isExtracting: legacyState.isExtracting ?? false,
+        currentChannel: legacyState.currentChannel ?? null,
+        extractedMessages: legacyState.extractedMessages ?? {},
+        isScrollingEnabled: true,
+      };
+
+      // Validate before saving
+      const validatedState = await StorageStateSchema.parseAsync(migratedState);
+
+      // Save to new key
+      await chrome.storage.local.set({
+        [this.STORAGE_KEY]: validatedState,
+      });
+
+      // Clean up legacy data
+      await chrome.storage.local.remove([this.LEGACY_KEY, 'allMessages']);
+    }
+
+    // Mark migration as complete
+    await chrome.storage.local.set({
+      [this.MIGRATION_COMPLETE_KEY]: true,
+    });
+  }
+
   public async loadState(): Promise<StorageState> {
     const startTime = performance.now();
     const metricsUpdate = this.updateMetrics();
+
+    // Run migration if needed
+    await this.migrateFromLegacy();
 
     if (this.cachedState !== null) {
       const endTime = performance.now();
@@ -98,33 +137,10 @@ export class StorageService {
       return this.cachedState;
     }
 
-    const data = await chrome.storage.local.get([this.STORAGE_KEY, this.LEGACY_KEY]);
+    const data = await chrome.storage.local.get(this.STORAGE_KEY);
 
-    // Try loading from new storage key first
     if (this.STORAGE_KEY in data && data[this.STORAGE_KEY] !== null) {
       this.cachedState = await StorageStateSchema.parseAsync(data[this.STORAGE_KEY]);
-      const endTime = performance.now();
-      this.metrics.readTimes.push(endTime - startTime);
-      await metricsUpdate;
-      return this.cachedState;
-    }
-
-    // Fall back to legacy storage
-    if (this.LEGACY_KEY in data && data[this.LEGACY_KEY] !== null) {
-      const legacyState = data[this.LEGACY_KEY];
-      // Migrate legacy state to new format
-      const migratedState = {
-        isExtracting: legacyState.isExtracting ?? false,
-        currentChannel: legacyState.currentChannel ?? null,
-        extractedMessages: legacyState.extractedMessages ?? {},
-        isScrollingEnabled: true, // Default for migrated states
-      };
-
-      // Save migrated state in new format
-      this.cachedState = await StorageStateSchema.parseAsync(migratedState);
-      this.scheduleWrite(async () => {
-        await chrome.storage.local.set({ [this.STORAGE_KEY]: this.cachedState });
-      });
       const endTime = performance.now();
       this.metrics.readTimes.push(endTime - startTime);
       await metricsUpdate;
@@ -216,12 +232,7 @@ export class StorageService {
 
       // Single storage operation with all updates
       await chrome.storage.local.set({
-        allMessages: validatedMessages,
         [this.STORAGE_KEY]: {
-          ...loadedState,
-          extractedMessages: validatedMessages,
-        },
-        [this.LEGACY_KEY]: {
           ...loadedState,
           extractedMessages: validatedMessages,
         },
