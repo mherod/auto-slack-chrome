@@ -23,26 +23,58 @@ type StorageState = z.infer<typeof StorageStateSchema>;
 
 export class StorageService {
   private readonly STORAGE_KEY = 'slack-extractor-state';
+  private readonly LEGACY_KEY = 'extensionState';
 
   public async loadState(): Promise<StorageState> {
-    const data = await chrome.storage.local.get(this.STORAGE_KEY);
-    const state = data[this.STORAGE_KEY] ?? {
+    const data = await chrome.storage.local.get([this.STORAGE_KEY, this.LEGACY_KEY]);
+
+    // Try loading from new storage key first
+    if (data[this.STORAGE_KEY]) {
+      const state = StorageStateSchema.parse(data[this.STORAGE_KEY]);
+      return state;
+    }
+
+    // Fall back to legacy storage
+    if (data[this.LEGACY_KEY]) {
+      const legacyState = data[this.LEGACY_KEY];
+      // Migrate legacy state to new format
+      const migratedState = {
+        isExtracting: legacyState.isExtracting ?? false,
+        currentChannel: legacyState.currentChannel ?? null,
+        extractedMessages: legacyState.extractedMessages ?? {},
+        isScrollingEnabled: true, // Default for migrated states
+      };
+
+      // Save migrated state in new format
+      await this.saveState(migratedState);
+      return StorageStateSchema.parse(migratedState);
+    }
+
+    // Default state if nothing exists
+    return {
       isExtracting: false,
       currentChannel: null,
       extractedMessages: {},
       isScrollingEnabled: true,
     };
-    return StorageStateSchema.parse(state);
   }
 
   public async saveState(
     state: Omit<StorageState, 'isScrollingEnabled'> & { isScrollingEnabled?: boolean },
   ): Promise<void> {
     const currentState = await this.loadState();
+    const newState = {
+      ...state,
+      isScrollingEnabled: state.isScrollingEnabled ?? currentState.isScrollingEnabled,
+    };
+
+    // Save to both storage keys for backward compatibility
     await chrome.storage.local.set({
-      [this.STORAGE_KEY]: {
-        ...state,
-        isScrollingEnabled: state.isScrollingEnabled ?? currentState.isScrollingEnabled,
+      [this.STORAGE_KEY]: newState,
+      [this.LEGACY_KEY]: {
+        isExtracting: newState.isExtracting,
+        currentChannel: newState.currentChannel,
+        extractedMessages: newState.extractedMessages,
       },
     });
   }
