@@ -1,7 +1,7 @@
 import { startOfDay } from 'date-fns';
-import type { SlackMessage, ChannelInfo, MessagesByOrganization } from './types';
 import type { MessageExtractor } from './message-extractor';
 import type { StorageService } from './storage';
+import type { ChannelInfo, MessagesByOrganization, SlackMessage } from './types';
 
 export class MonitorService {
   private observer: MutationObserver | null = null;
@@ -17,7 +17,20 @@ export class MonitorService {
   private readonly POLLING_INTERVAL_MS = 2500; // Poll every 2.5 seconds
   private readonly TITLE_CHECK_INTERVAL_MS = 5000; // Check title every 5 seconds
   private readonly RECONNECT_CHECK_INTERVAL_MS = 7500; // Check connection every 7.5 seconds
+  private readonly AUTO_SCROLL_STEP = 500; // Reduced from 1000 to 500 pixels per step
+  private readonly AUTO_SCROLL_INTERVAL_MS = 500; // Reduced from 1000 to 500ms between attempts
+  private readonly SCROLL_PAUSE_MS = 750; // Reduced from 1000 to 750ms pause between scrolls
+  private readonly MAX_SCROLL_ATTEMPTS = 50;
+  private readonly SCROLL_THRESHOLD = 100;
+  private readonly MAX_WAIT_FOR_MESSAGES_MS = 3000; // Maximum time to wait for new messages
+  private autoScrollInterval: number | null = null;
+  private lastScrollPosition: number = 0;
+  private scrollAttempts: number = 0;
+  private lastMessageCount: number = 0;
   private isExtracting = false;
+  private isAutoScrolling = false;
+  private readonly MAX_IDLE_TIME_MS = 10000; // Maximum time to stay idle before restarting scroll
+  private lastScrollTime: number = Date.now();
 
   public constructor(
     private readonly messageExtractor: MessageExtractor,
@@ -48,6 +61,15 @@ export class MonitorService {
         top: 8px;
         pointer-events: none;
       }
+
+      .auto-slack-scroll-container {
+        border: 2px solid rgba(54, 197, 171, 0.4) !important;
+        border-radius: 4px !important;
+      }
+
+      .auto-slack-scroll-container--scrolling {
+        border-color: rgba(54, 197, 171, 0.8) !important;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -55,6 +77,20 @@ export class MonitorService {
   private markMessageAsExtracted(element: Element): void {
     if (!element.hasAttribute(this.EXTRACTED_ATTRIBUTE)) {
       element.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+    }
+  }
+
+  private markScrollContainer(container: Element | null): void {
+    if (container === null) return;
+    container.classList.add('auto-slack-scroll-container');
+  }
+
+  private markScrollContainerAsScrolling(container: Element | null, isScrolling: boolean): void {
+    if (container === null) return;
+    if (isScrolling) {
+      container.classList.add('auto-slack-scroll-container--scrolling');
+    } else {
+      container.classList.remove('auto-slack-scroll-container--scrolling');
     }
   }
 
@@ -72,6 +108,10 @@ export class MonitorService {
     // Set up message observer
     this.setupMessageObserver();
 
+    // Mark the scroll container
+    const container = this.messageExtractor.getMessageContainer();
+    this.markScrollContainer(container);
+
     // Set up scroll handler
     this.setupScrollHandler();
 
@@ -81,14 +121,30 @@ export class MonitorService {
     // Set up polling monitor
     this.setupPollingMonitor();
 
-    // Initial extraction
+    // Initial extraction and then start scrolling
     await this.extractMessages();
+    await this.autoScroll();
 
     // Save initial state
     await this.saveCurrentState();
   }
 
   public async stopMonitoring(): Promise<void> {
+    // Stop auto-scrolling
+    this.isAutoScrolling = false;
+
+    const container = this.messageExtractor.getMessageContainer();
+
+    // Remove visual indicators
+    if (container !== null) {
+      container.classList.remove(
+        'auto-slack-scroll-container',
+        'auto-slack-scroll-container--scrolling',
+      );
+      // Remove scroll listener
+      container.removeEventListener('scroll', this.handleScroll);
+    }
+
     // Stop observers and handlers
     if (this.observer !== null) {
       this.observer.disconnect();
@@ -115,10 +171,9 @@ export class MonitorService {
       this.pollingInterval = null;
     }
 
-    // Remove scroll listener
-    const container = this.messageExtractor.getMessageContainer();
-    if (container !== null) {
-      container.removeEventListener('scroll', this.handleScroll);
+    if (this.autoScrollInterval !== null) {
+      window.clearInterval(this.autoScrollInterval);
+      this.autoScrollInterval = null;
     }
 
     // Save state
@@ -153,6 +208,9 @@ export class MonitorService {
     if (this.scrollTimeout !== null) {
       window.clearTimeout(this.scrollTimeout);
     }
+
+    // Don't handle manual scrolls during auto-scrolling
+    if (this.isAutoScrolling) return;
 
     // Disconnect observer during scroll
     if (this.observer !== null) {
@@ -269,84 +327,343 @@ export class MonitorService {
     }
   }
 
-  private async extractMessages(): Promise<void> {
-    if (this.isExtracting) return;
-    this.isExtracting = true;
+  private nextTick(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  private log(message: string, data?: unknown): void {
+    console.log(`[Slack Extractor] ${message}`, data ?? '');
+  }
+
+  private async findAndScrollElement(): Promise<Element | null> {
+    // Find all elements with a visible scrollbar
+    const allElements = document.querySelectorAll('*');
+    const scrollableElements: HTMLElement[] = [];
+
+    for (const element of allElements) {
+      if (element instanceof HTMLElement) {
+        const style = window.getComputedStyle(element);
+        const hasVisibleScrollbar =
+          element.scrollHeight > element.clientHeight &&
+          (style.overflowY === 'scroll' || style.overflowY === 'auto') &&
+          style.display !== 'none' &&
+          element.clientHeight > 0;
+
+        if (hasVisibleScrollbar) {
+          scrollableElements.push(element);
+          this.log('Found scrollable element', {
+            className: element.className,
+            id: element.id,
+            scrollHeight: element.scrollHeight,
+            clientHeight: element.clientHeight,
+            overflowY: style.overflowY,
+            display: style.display,
+            position: style.position,
+          });
+        }
+      }
+    }
+
+    // Sort by scroll height difference to find the most scrollable element
+    scrollableElements.sort(
+      (a, b) => b.scrollHeight - b.clientHeight - (a.scrollHeight - a.clientHeight),
+    );
+
+    for (const element of scrollableElements) {
+      // Try a simple scroll first
+      const beforeScroll = element.scrollTop;
+      element.scrollTop = Math.max(0, element.scrollTop - this.AUTO_SCROLL_STEP);
+      await this.nextTick();
+
+      if (element.scrollTop !== beforeScroll) {
+        this.log('Found working scroll element', {
+          className: element.className,
+          id: element.id,
+          beforeScroll,
+          afterScroll: element.scrollTop,
+        });
+        return element;
+      }
+    }
+
+    return null;
+  }
+
+  private async attemptScrollOnElement(element: Element, amount: number): Promise<boolean> {
+    if (!(element instanceof HTMLElement)) return false;
+
+    const el = element;
+    const beforeMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
+
+    // Log initial state
+    this.log('Attempting scroll on element', {
+      className: el.className,
+      id: el.id,
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      offsetHeight: el.offsetHeight,
+    });
 
     try {
-      // Update channel info
-      this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
-      if (this.currentChannelInfo === null) return;
+      // Simple direct scroll
+      const beforeScroll = el.scrollTop;
+      el.scrollTop = Math.max(0, el.scrollTop - amount);
+      await this.nextTick();
 
+      const didScroll = el.scrollTop !== beforeScroll;
+      if (didScroll) {
+        this.lastScrollTime = Date.now(); // Update last scroll time on successful scroll
+      }
+      this.log('Scroll attempt', {
+        didScroll,
+        beforeScroll,
+        afterScroll: el.scrollTop,
+      });
+
+      if (!didScroll) {
+        // If direct scroll failed, try scrollIntoView on first unextracted message
+        const unextractedMessage = el.querySelector(
+          `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
+        );
+        if (unextractedMessage instanceof HTMLElement) {
+          const beforeScrollIntoView = el.scrollTop;
+          unextractedMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
+          await this.nextTick();
+          const didScrollIntoView = el.scrollTop !== beforeScrollIntoView;
+
+          this.log('ScrollIntoView attempt', {
+            didScroll: didScrollIntoView,
+            beforeScroll: beforeScrollIntoView,
+            afterScroll: el.scrollTop,
+          });
+
+          if (didScrollIntoView) return true;
+        }
+      }
+
+      // Wait for content to load
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Check for new messages
+      const afterMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
+      const messageCountChanged = afterMessageCount > beforeMessageCount;
+
+      return didScroll || messageCountChanged;
+    } catch (error) {
+      this.log('Error during scroll attempt', {
+        element: el.className,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return false;
+    }
+  }
+
+  private async waitForNewMessages(currentCount: number): Promise<boolean> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < this.MAX_WAIT_FOR_MESSAGES_MS) {
+      const newCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
+      if (newCount > currentCount) {
+        this.log('Found new messages', {
+          beforeCount: currentCount,
+          afterCount: newCount,
+          waitTime: Date.now() - startTime,
+        });
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    this.log('Timed out waiting for new messages', {
+      messageCount: currentCount,
+      waitTime: this.MAX_WAIT_FOR_MESSAGES_MS,
+    });
+    return false;
+  }
+
+  private async autoScroll(): Promise<void> {
+    if (this.isAutoScrolling) {
+      this.log('Already auto-scrolling, skipping');
+      return;
+    }
+
+    this.lastScrollTime = Date.now();
+    this.isAutoScrolling = true;
+    this.scrollAttempts = 0;
+    let consecutiveNoNewMessages = 0;
+    const MAX_NO_NEW_MESSAGES = 3;
+
+    try {
+      while (this.scrollAttempts < this.MAX_SCROLL_ATTEMPTS && this.isAutoScrolling) {
+        // Wait for any ongoing extraction to complete
+        while (this.isExtracting) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+
+        const beforeMessageCount = document.querySelectorAll(
+          '[data-qa="virtual-list-item"]',
+        ).length;
+        const scrollableElement = await this.findAndScrollElement();
+
+        if (!scrollableElement) {
+          this.log('No scrollable element found');
+          break;
+        }
+
+        this.log('Scrolling attempt', {
+          attempt: this.scrollAttempts + 1,
+          maxAttempts: this.MAX_SCROLL_ATTEMPTS,
+          element: scrollableElement.className,
+          consecutiveNoNewMessages,
+        });
+
+        // Try to scroll
+        const scrolled = await this.attemptScrollOnElement(
+          scrollableElement,
+          this.AUTO_SCROLL_STEP,
+        );
+
+        if (!scrolled) {
+          this.log('Failed to scroll element');
+          break;
+        }
+
+        // Wait for content to load and DOM to update
+        await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
+
+        // Extract any new messages
+        if (!this.isExtracting) {
+          await this.extractMessages();
+        }
+
+        // Wait for new messages with timeout
+        const gotNewMessages = await this.waitForNewMessages(beforeMessageCount);
+
+        if (!gotNewMessages) {
+          consecutiveNoNewMessages++;
+          this.log('No new messages after scroll and wait', {
+            consecutiveNoNewMessages,
+            beforeCount: beforeMessageCount,
+          });
+
+          if (consecutiveNoNewMessages >= MAX_NO_NEW_MESSAGES) {
+            this.log('Stopping scroll due to no new messages');
+            break;
+          }
+        } else {
+          consecutiveNoNewMessages = 0;
+          // Small pause after successful message fetch
+          await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS / 2));
+        }
+
+        this.scrollAttempts++;
+      }
+    } finally {
+      this.isAutoScrolling = false;
+      this.log('Auto-scroll complete', {
+        attempts: this.scrollAttempts,
+        consecutiveNoNewMessages,
+      });
+    }
+  }
+
+  private async extractMessages(): Promise<void> {
+    if (this.isExtracting || this.currentChannelInfo === null) {
+      this.log('Skipping extraction', {
+        reason: this.isExtracting ? 'already_extracting' : 'no_channel_info',
+      });
+      return;
+    }
+
+    this.isExtracting = true;
+    this.log('Starting message extraction');
+
+    try {
       const messageElements = document.querySelectorAll('[data-qa="virtual-list-item"]');
+      this.log('Found message elements', { count: messageElements.length });
+
       if (messageElements.length === 0) return;
 
-      // Reset last known sender at the start of extraction
-      this.messageExtractor.resetLastKnownSender();
+      // Process messages in chunks to keep UI responsive
+      const messages = Array.from(messageElements);
+      const chunkSize = 10;
 
-      // Convert NodeList to Array for proper iteration
-      await Promise.all(
-        Array.from(messageElements).map(async (listItem) => {
-          // Skip already extracted messages unless they need sender update
-          if (
-            listItem.hasAttribute(this.EXTRACTED_ATTRIBUTE) &&
-            !listItem.hasAttribute('data-needs-sender-update')
-          ) {
-            return;
-          }
+      for (let i = 0; i < messages.length; i += chunkSize) {
+        const chunk = messages.slice(i, i + chunkSize);
+        this.log('Processing message chunk', {
+          chunk: i / chunkSize + 1,
+          totalChunks: Math.ceil(messages.length / chunkSize),
+          chunkSize: chunk.length,
+        });
 
-          // Get message ID from the list item
-          const messageId = listItem.getAttribute('id');
+        await Promise.all(
+          chunk.map(async (listItem) => {
+            // Skip already extracted messages unless they need sender update
+            if (
+              listItem.hasAttribute(this.EXTRACTED_ATTRIBUTE) &&
+              !listItem.hasAttribute('data-needs-sender-update')
+            ) {
+              return;
+            }
 
-          // Skip invalid messages and UI elements
-          if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
+            // Get message ID from the list item
+            const messageId = listItem.getAttribute('id');
 
-          // Skip empty messages or UI elements without actual text content
-          const messageText = listItem.querySelector('[data-qa="message-text"]');
-          const text = messageText?.textContent ?? '';
-          if (text.trim() === '') return;
+            // Skip invalid messages and UI elements
+            if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
 
-          // Extract sender information with follow-up message handling
-          const { sender, senderId, avatarUrl, customStatus, isInferred } =
-            this.messageExtractor.extractMessageSender(listItem);
+            // Skip empty messages or UI elements without actual text content
+            const messageText = listItem.querySelector('[data-qa="message-text"]');
+            const text = messageText?.textContent ?? '';
+            if (text.trim() === '') return;
 
-          // Get timestamp and permalink
-          const timestampElement = listItem.querySelector('.c-timestamp');
-          if (timestampElement === null) return;
+            // Extract sender information with follow-up message handling
+            const { sender, senderId, avatarUrl, customStatus, isInferred } =
+              this.messageExtractor.extractMessageSender(listItem);
 
-          const { timestamp, permalink } =
-            this.messageExtractor.extractMessageTimestamp(timestampElement);
+            // Get timestamp and permalink
+            const timestampElement = listItem.querySelector('.c-timestamp');
+            if (timestampElement === null) return;
 
-          // Skip messages without timestamps as they're likely UI elements
-          if (timestamp === null) return;
+            const { timestamp, permalink } =
+              this.messageExtractor.extractMessageTimestamp(timestampElement);
 
-          const message: SlackMessage = {
-            messageId,
-            sender,
-            senderId,
-            timestamp,
-            text,
-            permalink,
-            customStatus,
-            avatarUrl,
-            isInferredSender: isInferred,
-          };
+            // Skip messages without timestamps as they're likely UI elements
+            if (timestamp === null) return;
 
-          // Extract attachments if present
-          const attachments = this.messageExtractor.extractAttachments(listItem);
-          if (attachments) {
-            message.attachments = attachments;
-          }
+            const message: SlackMessage = {
+              messageId,
+              sender,
+              senderId,
+              timestamp,
+              text,
+              permalink,
+              customStatus,
+              avatarUrl,
+              isInferredSender: isInferred,
+            };
 
-          // Only add valid messages to the hierarchy and mark them as extracted
-          if (this.messageExtractor.isValidMessage(message)) {
-            await this.updateMessageHierarchy(message);
-            this.markMessageAsExtracted(listItem);
-          }
-        }),
-      );
+            // Extract attachments if present
+            const attachments = this.messageExtractor.extractAttachments(listItem);
+            if (attachments) {
+              message.attachments = attachments;
+            }
+
+            // Only add valid messages to the hierarchy and mark them as extracted
+            if (this.messageExtractor.isValidMessage(message)) {
+              await this.updateMessageHierarchy(message);
+              this.markMessageAsExtracted(listItem);
+            }
+          }),
+        );
+
+        // Allow UI to update between chunks
+        await this.nextTick();
+      }
     } finally {
       this.isExtracting = false;
+      this.log('Message extraction complete');
     }
   }
 
@@ -431,6 +748,16 @@ export class MonitorService {
           if (needsSenderUpdate.length > 0) {
             await this.extractMessages();
             this.onSync();
+          }
+
+          // Check if we've been idle too long and should restart scrolling
+          const timeSinceLastScroll = Date.now() - this.lastScrollTime;
+          if (timeSinceLastScroll > this.MAX_IDLE_TIME_MS && !this.isAutoScrolling) {
+            this.log('Restarting scroll due to idle timeout', {
+              idleTime: timeSinceLastScroll,
+              maxIdleTime: this.MAX_IDLE_TIME_MS,
+            });
+            void this.autoScroll();
           }
         }
       }
