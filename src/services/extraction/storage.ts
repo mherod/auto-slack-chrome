@@ -1,4 +1,4 @@
-import { flatMap, get, isEmpty, mean, merge, set, sortBy, sumBy, memoize } from 'lodash';
+import { flatMap, get, isEmpty, mean, memoize, merge, set, sortBy, sumBy } from 'lodash';
 import { z } from 'zod';
 import { MessagesByOrganizationSchema } from './schemas';
 import type { ChannelInfo, MessagesByOrganization, SlackMessage } from './types';
@@ -271,7 +271,6 @@ export class StorageService {
     const timeRanges: ExtractedTimeRanges = {};
     const TWENTY_MINUTES_MS = 20 * 60 * 1000; // 20 minutes in milliseconds
     const MAX_RANGES = 30;
-    const RANGES_TO_MERGE = 8;
 
     for (const [org, orgData] of Object.entries(messages)) {
       timeRanges[org] = {};
@@ -319,20 +318,45 @@ export class StorageService {
             }
           }
 
-          // If we have too many ranges, merge some in the middle
-          if (mergedRanges.length > MAX_RANGES) {
-            const midPoint = Math.floor(mergedRanges.length / 2);
-            const startMergeIndex = midPoint - Math.floor(RANGES_TO_MERGE / 2);
-            const endMergeIndex = startMergeIndex + RANGES_TO_MERGE;
+          // Keep merging ranges in the middle until we're under the limit
+          while (mergedRanges.length > MAX_RANGES) {
+            // Find the ranges with the smallest gap between them
+            let smallestGap = Infinity;
+            let smallestGapIndex = -1;
 
-            // Create a merged range from the middle ranges
-            const middleRange = {
-              start: mergedRanges[startMergeIndex].start,
-              end: mergedRanges[endMergeIndex - 1].end,
-            };
+            for (let i = 1; i < mergedRanges.length - 1; i++) {
+              const gapBefore = mergedRanges[i].start - mergedRanges[i - 1].end;
+              const gapAfter = mergedRanges[i + 1].start - mergedRanges[i].end;
 
-            // Replace the middle ranges with the merged range
-            mergedRanges.splice(startMergeIndex, RANGES_TO_MERGE, middleRange);
+              // Consider both gaps around this range
+              const totalGap = gapBefore + gapAfter;
+              if (totalGap < smallestGap) {
+                smallestGap = totalGap;
+                smallestGapIndex = i;
+              }
+            }
+
+            if (smallestGapIndex > 0) {
+              // Merge three consecutive ranges at the smallest gap
+              const mergedRange = {
+                start: mergedRanges[smallestGapIndex - 1].start,
+                end: mergedRanges[smallestGapIndex + 1].end,
+              };
+
+              // Replace three ranges with the merged one
+              mergedRanges.splice(smallestGapIndex - 1, 3, mergedRange);
+            } else {
+              // Fallback: merge the middle ranges if we can't find good gaps
+              const midPoint = Math.floor(mergedRanges.length / 2);
+              const startMergeIndex = midPoint - 1;
+
+              const mergedRange = {
+                start: mergedRanges[startMergeIndex].start,
+                end: mergedRanges[startMergeIndex + 2].end,
+              };
+
+              mergedRanges.splice(startMergeIndex, 3, mergedRange);
+            }
           }
 
           timeRanges[org][channel] = mergedRanges;

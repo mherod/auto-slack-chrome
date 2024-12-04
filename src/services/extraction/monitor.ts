@@ -12,7 +12,8 @@ export class MonitorService {
   private reconnectInterval: number | null = null;
   private scrollTimeout: number | null = null;
   private pollingInterval: number | null = null;
-  private readonly EXTRACTED_ATTRIBUTE = 'data-message-extracted';
+  private readonly EXTRACTED_ATTRIBUTE = 'data-extracted';
+  private readonly RANGE_ATTRIBUTE = 'data-in-extracted-range';
   private readonly SCROLL_DEBOUNCE_MS = 250;
   private readonly POLLING_INTERVAL_MS = 2000;
   private readonly TITLE_CHECK_INTERVAL_MS = 5000;
@@ -50,18 +51,39 @@ export class MonitorService {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-      [${this.EXTRACTED_ATTRIBUTE}="true"]::after {
+      [${this.RANGE_ATTRIBUTE}="true"] {
+        position: relative;
+        background-color: rgba(54, 197, 171, 0.05);
+      }
+
+      [${this.RANGE_ATTRIBUTE}="true"]::before {
         content: '';
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background-color: #36C5AB;
-        opacity: 0.6;
         position: absolute;
-        right: 8px;
-        top: 8px;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background-color: rgba(54, 197, 171, 0.6);
         pointer-events: none;
+      }
+
+      [${this.RANGE_ATTRIBUTE}="true"][${this.EXTRACTED_ATTRIBUTE}="true"] {
+        background-color: rgba(54, 197, 171, 0.1);
+      }
+
+      [${this.RANGE_ATTRIBUTE}="true"][${this.EXTRACTED_ATTRIBUTE}="true"]::before {
+        background-color: rgba(54, 197, 171, 0.8);
+      }
+
+      .saved-indicator {
+        margin-left: 6px;
+        color: var(--sk_foreground_max_solid, #4a154b);
+        opacity: 0.7;
+        font-size: 12px;
+        font-style: italic;
+        user-select: none;
+        pointer-events: none;
+        vertical-align: baseline;
       }
 
       .auto-slack-scroll-container {
@@ -77,8 +99,23 @@ export class MonitorService {
   }
 
   private markMessageAsExtracted(element: Element): void {
-    if (!element.hasAttribute(this.EXTRACTED_ATTRIBUTE)) {
-      element.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+    // Get timestamp to check range status
+    const timestampElement = element.querySelector('.c-timestamp');
+    if (timestampElement) {
+      const { timestamp } = this.messageExtractor.extractMessageTimestamp(timestampElement);
+      if (timestamp && this.currentChannelInfo) {
+        const messageTime = new Date(timestamp).getTime();
+        const isInRange = this.storageService.isTimeRangeExtracted(
+          this.currentChannelInfo.organization,
+          this.currentChannelInfo.channel,
+          messageTime,
+        );
+        this.messageExtractor.markMessageAsExtracted(element, isInRange);
+      } else {
+        this.messageExtractor.markMessageAsExtracted(element);
+      }
+    } else {
+      this.messageExtractor.markMessageAsExtracted(element);
     }
   }
 
@@ -275,7 +312,12 @@ export class MonitorService {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['data-qa', 'data-needs-sender-update'],
+        attributeFilter: [
+          'data-qa',
+          'data-needs-sender-update',
+          this.EXTRACTED_ATTRIBUTE,
+          this.RANGE_ATTRIBUTE,
+        ],
       });
     }
   }
@@ -700,9 +742,15 @@ export class MonitorService {
 
       if (messageElements.length === 0) return;
 
-      // Process messages in chunks to keep UI responsive
+      // Process messages in dynamic chunks based on viewport size
       const messages = Array.from(messageElements);
-      const chunkSize = 10;
+      const viewportHeight = window.innerHeight;
+      const avgMessageHeight = 50; // Approximate average height of a message
+      const messagesInViewport = Math.ceil(viewportHeight / avgMessageHeight);
+      const chunkSize = Math.max(10, messagesInViewport); // At least 10, or enough to fill viewport
+
+      // Track processed message IDs to avoid reprocessing
+      const processedIds = new Set<string>();
 
       for (let i = 0; i < messages.length; i += chunkSize) {
         const chunk = messages.slice(i, i + chunkSize);
@@ -710,73 +758,93 @@ export class MonitorService {
           chunk: i / chunkSize + 1,
           totalChunks: Math.ceil(messages.length / chunkSize),
           chunkSize: chunk.length,
+          viewportMessages: messagesInViewport,
         });
 
-        await Promise.all(
-          chunk.map(async (listItem) => {
-            if (!(listItem instanceof HTMLElement)) return;
+        const extractionPromises = chunk.map(async (listItem) => {
+          if (!(listItem instanceof HTMLElement)) return;
 
-            // Skip already extracted messages unless they need sender update
-            if (
-              this.messageExtractor.isMessageExtracted(listItem) &&
-              !listItem.hasAttribute('data-needs-sender-update')
-            ) {
-              return;
-            }
+          const messageId = listItem.getAttribute('id');
+          if (!messageId || processedIds.has(messageId)) return;
 
-            // Get message ID from the list item
-            const messageId = listItem.getAttribute('id');
-
-            // Skip invalid messages and UI elements
-            if (messageId === null || !this.messageExtractor.isValidMessageId(messageId)) return;
-
-            // Skip empty messages or UI elements without actual text content
-            const messageText = listItem.querySelector('[data-qa="message-text"]');
-            const text = messageText?.textContent ?? '';
-            if (text.trim() === '') return;
-
-            // Extract sender information with follow-up message handling
-            const { sender, senderId, avatarUrl, customStatus, isInferred } =
-              this.messageExtractor.extractMessageSender(listItem);
-
-            // Get timestamp and permalink
+          // Skip already extracted messages unless they need sender update
+          if (
+            this.messageExtractor.isMessageExtracted(listItem) &&
+            !listItem.hasAttribute('data-needs-sender-update')
+          ) {
+            // Still check and mark if it's in range
             const timestampElement = listItem.querySelector('.c-timestamp');
-            if (timestampElement === null) return;
-
-            const { timestamp, permalink } =
-              this.messageExtractor.extractMessageTimestamp(timestampElement);
-
-            // Skip messages without timestamps as they're likely UI elements
-            if (timestamp === null) return;
-
-            const message: SlackMessage = {
-              messageId,
-              sender,
-              senderId,
-              timestamp,
-              text,
-              permalink,
-              customStatus,
-              avatarUrl,
-              isInferredSender: isInferred,
-            };
-
-            // Extract attachments if present
-            const attachments = this.messageExtractor.extractAttachments(listItem);
-            if (attachments) {
-              message.attachments = attachments;
+            if (timestampElement) {
+              const { timestamp } = this.messageExtractor.extractMessageTimestamp(timestampElement);
+              this.markMessageInRange(listItem, timestamp);
             }
+            processedIds.add(messageId);
+            return;
+          }
 
-            // Only add valid messages to the hierarchy and mark them as extracted
-            if (this.messageExtractor.isValidMessage(message)) {
-              await this.updateMessageHierarchy(message);
-              this.messageExtractor.markMessageAsExtracted(listItem);
-            }
-          }),
-        );
+          // Skip invalid messages and UI elements
+          if (!this.messageExtractor.isValidMessageId(messageId)) return;
 
-        // Allow UI to update between chunks
+          // Skip empty messages or UI elements without actual text content
+          const messageText = listItem.querySelector('[data-qa="message-text"]');
+          const text = messageText?.textContent ?? '';
+          if (text.trim() === '') return;
+
+          // Extract sender information with follow-up message handling
+          const { sender, senderId, avatarUrl, customStatus, isInferred } =
+            this.messageExtractor.extractMessageSender(listItem);
+
+          // Get timestamp and permalink
+          const timestampElement = listItem.querySelector('.c-timestamp');
+          if (timestampElement === null) return;
+
+          const { timestamp, permalink } =
+            this.messageExtractor.extractMessageTimestamp(timestampElement);
+
+          // Skip messages without timestamps as they're likely UI elements
+          if (timestamp === null) return;
+
+          // Mark if message is in extracted range
+          this.markMessageInRange(listItem, timestamp);
+
+          const message: SlackMessage = {
+            messageId,
+            sender,
+            senderId,
+            timestamp,
+            text,
+            permalink,
+            customStatus,
+            avatarUrl,
+            isInferredSender: isInferred,
+          };
+
+          // Extract attachments if present
+          const attachments = this.messageExtractor.extractAttachments(listItem);
+          if (attachments) {
+            message.attachments = attachments;
+          }
+
+          // Only add valid messages to the hierarchy and mark them as extracted
+          if (this.messageExtractor.isValidMessage(message)) {
+            await this.updateMessageHierarchy(message);
+            this.messageExtractor.markMessageAsExtracted(listItem);
+            processedIds.add(messageId);
+          }
+        });
+
+        // Process chunk in parallel but wait for completion
+        await Promise.all(extractionPromises);
+
+        // Allow UI to update between chunks and check if we should continue
         await this.nextTick();
+
+        // Check if extraction should continue
+        const state = await this.storageService.loadState();
+        if (!state.isScrollingEnabled && this.isAutoScrolling) {
+          this.log('Stopping extraction due to disabled auto-scroll');
+          break;
+        }
       }
     } finally {
       this.isExtracting = false;
@@ -834,6 +902,7 @@ export class MonitorService {
       isExtracting: this.observer !== null,
       currentChannel: this.currentChannelInfo,
       extractedMessages: this.extractedMessages,
+      extractedTimeRanges: {}, // Let storage service compute this from messages
     });
   }
 
@@ -929,5 +998,28 @@ export class MonitorService {
       const timeB = new Date(b.timestamp ?? 0).getTime();
       return timeA - timeB;
     });
+  }
+
+  private markMessageInRange(element: Element, timestamp: string | null): void {
+    if (!timestamp || !this.currentChannelInfo) return;
+
+    const messageTime = new Date(timestamp).getTime();
+    const isInRange = this.storageService.isTimeRangeExtracted(
+      this.currentChannelInfo.organization,
+      this.currentChannelInfo.channel,
+      messageTime,
+    );
+
+    // Set or remove the range attribute
+    if (isInRange) {
+      element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
+    } else {
+      element.removeAttribute(this.RANGE_ATTRIBUTE);
+    }
+
+    // Update the text indicator if the message is already extracted
+    if (this.messageExtractor.isMessageExtracted(element)) {
+      this.messageExtractor.updateRangeIndicator(element, isInRange);
+    }
   }
 }

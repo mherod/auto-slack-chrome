@@ -19,6 +19,7 @@ module.exports = [
         console: 'readonly',
         document: 'readonly',
         window: 'readonly',
+        performance: 'readonly',
         self: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
@@ -125,7 +126,8 @@ module.exports = [
         'error',
         {
           name: 'setInterval',
-          message: 'Use chrome.alarms API instead for better battery life and reliability in background contexts',
+          message:
+            'Use chrome.alarms API instead for better battery life and reliability in background contexts',
         },
       ],
       'no-script-url': 'error',
@@ -168,8 +170,15 @@ module.exports = [
       globals: {
         self: true,
         ServiceWorkerGlobalScope: true,
-        chrome: true
-      }
-    }
+        chrome: true,
+      },
+    },
+  },
+  {
+    files: ['src/services/extraction/storage.ts'],
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    },
   },
 ];

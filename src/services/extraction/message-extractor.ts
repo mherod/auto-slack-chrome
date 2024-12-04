@@ -11,6 +11,7 @@ import {
 export class MessageExtractor {
   private lastKnownSender: LastKnownSender | null = null;
   private EXTRACTED_ATTRIBUTE = 'data-extracted';
+  private RANGE_ATTRIBUTE = 'data-in-range';
 
   private log(message: string, data?: unknown): void {
     console.log(`[Slack Extractor] ${message}`, data ?? '');
@@ -516,12 +517,21 @@ export class MessageExtractor {
     this.lastKnownSender = null;
   }
 
-  public markMessageAsExtracted(messageElement: HTMLElement): void {
+  public markMessageAsExtracted(element: Element, isInRange?: boolean): void {
     // Add the extracted attribute
-    messageElement.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+    element.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+
+    // Set range attribute if provided
+    if (typeof isInRange === 'boolean') {
+      if (isInRange) {
+        element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
+      } else {
+        element.removeAttribute(this.RANGE_ATTRIBUTE);
+      }
+    }
 
     // Find the timestamp element - try multiple selectors for different message formats
-    const timestampElement = messageElement.querySelector(
+    const timestampElement = element.querySelector(
       '[data-ts], .c-timestamp, .c-message_kit__timestamp',
     );
     if (timestampElement instanceof HTMLElement) {
@@ -535,26 +545,41 @@ export class MessageExtractor {
       if (!savedIndicator) {
         savedIndicator = document.createElement('span');
         savedIndicator.className = 'saved-indicator';
-        savedIndicator.style.cssText = `
-          margin-left: 6px;
-          color: var(--sk_foreground_max_solid, #4a154b);
-          opacity: 0.5;
-          font-size: 12px;
-          font-style: italic;
-          user-select: none;
-          pointer-events: none;
-          vertical-align: baseline;
-        `;
         savedIndicator.textContent = '• Saved';
         timestampElement.insertAdjacentElement('afterend', savedIndicator);
+      }
+
+      // Update text to show range status if provided
+      if (typeof isInRange === 'boolean') {
+        savedIndicator.textContent = isInRange ? '• Saved (in range)' : '• Saved';
       }
     }
   }
 
-  public isMessageExtracted(messageElement: HTMLElement): boolean {
+  public updateRangeIndicator(element: Element, isInRange: boolean): void {
+    // Update range attribute
+    if (isInRange) {
+      element.setAttribute(this.RANGE_ATTRIBUTE, 'true');
+    } else {
+      element.removeAttribute(this.RANGE_ATTRIBUTE);
+    }
+
+    // Update text indicator
+    const timestampElement = element.querySelector(
+      '[data-ts], .c-timestamp, .c-message_kit__timestamp',
+    );
+    if (timestampElement instanceof HTMLElement) {
+      const savedIndicator = timestampElement.nextElementSibling;
+      if (savedIndicator?.classList.contains('saved-indicator')) {
+        savedIndicator.textContent = isInRange ? '• Saved (in range)' : '• Saved';
+      }
+    }
+  }
+
+  public isMessageExtracted(element: Element): boolean {
     return (
-      messageElement.hasAttribute(this.EXTRACTED_ATTRIBUTE) ||
-      messageElement.querySelector('.saved-indicator') !== null
+      element.hasAttribute(this.EXTRACTED_ATTRIBUTE) ||
+      element.querySelector('.saved-indicator') !== null
     );
   }
 
