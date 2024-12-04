@@ -14,12 +14,10 @@ important discussions, creating documentation, or archiving conversations.
 - 🔗 Keeps message permalinks
 - 💾 Auto-saves progress
 - 🏃‍♂️ Handles follow-up messages smartly
-- 🔄 Auto-reload during development
-- ⚡ Optimized storage with caching
-- 🎨 Modern UI with loading states
-- 📜 Auto-scrolling with toggle
-- 🔒 Strong type safety with Zod
-- 🔁 Automatic state recovery
+- 🔄 Smart auto-scrolling
+- 🔍 Visual extraction indicators
+- 🗂️ Intelligent message organization
+- 🌊 Smooth animations
 
 ## 🚀 Getting Started
 
@@ -73,6 +71,12 @@ The extension will organize messages by:
 - Organization
 - Channel/DM
 - Date
+- Time ranges
+
+Messages are automatically grouped into time ranges for better organization:
+- Similar time periods are intelligently merged
+- Visual indicators show extraction progress
+- Easy-to-read time summaries in the popup
 
 ## 🏗️ Project Structure
 
@@ -80,12 +84,6 @@ The extension will organize messages by:
 src/
 ├── services/          # Core functionality
 │   └── extraction/    # Message extraction services
-│       ├── connection.ts    # Background communication
-│       ├── message-extractor.ts  # Message parsing
-│       ├── monitor.ts      # Message monitoring
-│       ├── storage.ts      # State persistence
-│       ├── schemas.ts      # Zod schemas
-│       └── types.ts        # TypeScript types
 ├── background.ts      # Service worker
 ├── content.ts         # Content script
 ├── popup.ts          # Extension UI logic
@@ -95,14 +93,10 @@ src/
 
 ## 🛠️ Tech Stack
 
-- TypeScript for type safety
+- TypeScript
 - Chrome Extensions API
-- Webpack + webpack-ext-reloader
+- Webpack
 - ESLint + Prettier
-- Husky + lint-staged
-- Zod for schema validation
-- date-fns for date handling
-- lodash for utilities
 
 ## 📝 Notes
 
@@ -110,7 +104,4 @@ src/
 - Only works with Slack's web app
 - Respects Slack's rate limits
 - Handles connection drops gracefully
-- Uses optimized storage with caching
-- Supports automatic extension reloading
-- Implements strict type checking
-- Features modern UI with loading states
+- Modern, responsive UI
