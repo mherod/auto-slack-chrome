@@ -10,6 +10,7 @@ import {
 
 export class MessageExtractor {
   private lastKnownSender: LastKnownSender | null = null;
+  private EXTRACTED_ATTRIBUTE = 'data-extracted';
 
   private log(message: string, data?: unknown): void {
     console.log(`[Slack Extractor] ${message}`, data ?? '');
@@ -513,5 +514,55 @@ export class MessageExtractor {
 
   public resetLastKnownSender(): void {
     this.lastKnownSender = null;
+  }
+
+  public markMessageAsExtracted(messageElement: HTMLElement): void {
+    // Add the extracted attribute
+    messageElement.setAttribute(this.EXTRACTED_ATTRIBUTE, 'true');
+
+    // Find the timestamp element - try multiple selectors for different message formats
+    const timestampElement = messageElement.querySelector(
+      '[data-ts], .c-timestamp, .c-message_kit__timestamp',
+    );
+    if (timestampElement instanceof HTMLElement) {
+      // Create or find the saved indicator
+      let savedIndicator = timestampElement.nextElementSibling?.classList.contains(
+        'saved-indicator',
+      )
+        ? (timestampElement.nextElementSibling as HTMLElement)
+        : null;
+
+      if (!savedIndicator) {
+        savedIndicator = document.createElement('span');
+        savedIndicator.className = 'saved-indicator';
+        savedIndicator.style.cssText = `
+          margin-left: 6px;
+          color: var(--sk_foreground_max_solid, #4a154b);
+          opacity: 0.5;
+          font-size: 12px;
+          font-style: italic;
+          user-select: none;
+          pointer-events: none;
+          vertical-align: baseline;
+        `;
+        savedIndicator.textContent = '• Saved';
+        timestampElement.insertAdjacentElement('afterend', savedIndicator);
+      }
+    }
+  }
+
+  public isMessageExtracted(messageElement: HTMLElement): boolean {
+    return (
+      messageElement.hasAttribute(this.EXTRACTED_ATTRIBUTE) ||
+      messageElement.querySelector('.saved-indicator') !== null
+    );
+  }
+
+  public removeExtractionMark(messageElement: HTMLElement): void {
+    messageElement.removeAttribute(this.EXTRACTED_ATTRIBUTE);
+    const savedIndicator = messageElement.querySelector('.saved-indicator');
+    if (savedIndicator) {
+      savedIndicator.remove();
+    }
   }
 }

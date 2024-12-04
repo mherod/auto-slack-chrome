@@ -680,9 +680,11 @@ export class MonitorService {
 
         await Promise.all(
           chunk.map(async (listItem) => {
+            if (!(listItem instanceof HTMLElement)) return;
+
             // Skip already extracted messages unless they need sender update
             if (
-              listItem.hasAttribute(this.EXTRACTED_ATTRIBUTE) &&
+              this.messageExtractor.isMessageExtracted(listItem) &&
               !listItem.hasAttribute('data-needs-sender-update')
             ) {
               return;
@@ -734,7 +736,7 @@ export class MonitorService {
             // Only add valid messages to the hierarchy and mark them as extracted
             if (this.messageExtractor.isValidMessage(message)) {
               await this.updateMessageHierarchy(message);
-              this.markMessageAsExtracted(listItem);
+              this.messageExtractor.markMessageAsExtracted(listItem);
             }
           }),
         );
