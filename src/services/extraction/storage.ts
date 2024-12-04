@@ -1,41 +1,63 @@
 import { merge } from 'lodash';
-import { ExtensionStateSchema, MessagesByOrganizationSchema } from './schemas';
-import type { ExtensionState, MessagesByOrganization } from './types';
+import { z } from 'zod';
+import { MessagesByOrganizationSchema } from './schemas';
+import type { MessagesByOrganization } from './types';
+
+const StorageStateSchema = z.object({
+  isExtracting: z.boolean(),
+  currentChannel: z.union([
+    z.null(),
+    z.object({
+      organization: z.string(),
+      channel: z.string(),
+    }),
+  ]),
+  extractedMessages: z.record(
+    z.string(),
+    z.record(z.string(), z.record(z.string(), z.array(z.any()))),
+  ),
+  isScrollingEnabled: z.boolean().default(true),
+});
+
+type StorageState = z.infer<typeof StorageStateSchema>;
 
 export class StorageService {
-  public async loadState(): Promise<ExtensionState> {
-    const result = await chrome.storage.local.get(['extensionState']);
-    const defaultState: ExtensionState = {
+  private readonly STORAGE_KEY = 'slack-extractor-state';
+
+  public async loadState(): Promise<StorageState> {
+    const data = await chrome.storage.local.get(this.STORAGE_KEY);
+    const state = data[this.STORAGE_KEY] ?? {
       isExtracting: false,
       currentChannel: null,
       extractedMessages: {},
+      isScrollingEnabled: true,
     };
-
-    if (typeof result.extensionState !== 'object' || result.extensionState === null) {
-      return defaultState;
-    }
-
-    try {
-      return ExtensionStateSchema.parse(result.extensionState);
-    } catch (error) {
-      console.error('Invalid extension state:', error);
-      return defaultState;
-    }
+    return StorageStateSchema.parse(state);
   }
 
-  public async saveState(state: ExtensionState): Promise<void> {
-    // Validate state before saving
-    const validatedState = ExtensionStateSchema.parse(state);
-
-    // Always merge with existing state using lodash merge
+  public async saveState(
+    state: Omit<StorageState, 'isScrollingEnabled'> & { isScrollingEnabled?: boolean },
+  ): Promise<void> {
     const currentState = await this.loadState();
-    const mergedState = merge({}, currentState, validatedState, {
-      extractedMessages: await this.mergeAndSaveMessages(
-        currentState.extractedMessages,
-        validatedState.extractedMessages,
-      ),
+    await chrome.storage.local.set({
+      [this.STORAGE_KEY]: {
+        ...state,
+        isScrollingEnabled: state.isScrollingEnabled ?? currentState.isScrollingEnabled,
+      },
     });
-    await chrome.storage.local.set({ extensionState: mergedState });
+  }
+
+  public async setScrollingEnabled(enabled: boolean): Promise<void> {
+    const currentState = await this.loadState();
+    await this.saveState({
+      ...currentState,
+      isScrollingEnabled: enabled,
+    });
+  }
+
+  public async isScrollingEnabled(): Promise<boolean> {
+    const state = await this.loadState();
+    return state.isScrollingEnabled;
   }
 
   public async loadAllMessages(): Promise<MessagesByOrganization> {

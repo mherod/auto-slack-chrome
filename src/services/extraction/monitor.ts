@@ -121,9 +121,13 @@ export class MonitorService {
     // Set up polling monitor
     this.setupPollingMonitor();
 
-    // Initial extraction and then start scrolling
+    // Initial extraction
     await this.extractMessages();
-    await this.autoScroll();
+
+    // Start scrolling only if enabled
+    if (await this.storageService.isScrollingEnabled()) {
+      await this.autoScroll();
+    }
 
     // Save initial state
     await this.saveCurrentState();
@@ -762,5 +766,17 @@ export class MonitorService {
         }
       }
     }, this.POLLING_INTERVAL_MS);
+  }
+
+  public async setScrollingEnabled(enabled: boolean): Promise<void> {
+    await this.storageService.setScrollingEnabled(enabled);
+
+    if (enabled && !this.isAutoScrolling) {
+      // Start scrolling if it's not already running
+      await this.autoScroll();
+    } else if (!enabled) {
+      // Stop scrolling
+      this.isAutoScrolling = false;
+    }
   }
 }
