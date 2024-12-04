@@ -93,17 +93,33 @@ export class StorageService {
   }
 
   public async loadAllMessages(): Promise<MessagesByOrganization> {
-    const result = await chrome.storage.local.get(['allMessages']);
+    const result = await chrome.storage.local.get([
+      'allMessages',
+      this.STORAGE_KEY,
+      this.LEGACY_KEY,
+    ]);
     const defaultMessages: MessagesByOrganization = {};
 
-    if (typeof result.allMessages !== 'object' || result.allMessages === null) {
-      return defaultMessages;
-    }
+    // Try loading from each possible location
+    const possibleMessages = [
+      result.allMessages,
+      result[this.STORAGE_KEY]?.extractedMessages,
+      result[this.LEGACY_KEY]?.extractedMessages,
+    ].filter((messages) => typeof messages === 'object' && messages !== null);
 
     try {
-      return MessagesByOrganizationSchema.parse(result.allMessages);
+      // Merge all valid message sources
+      return possibleMessages.reduce((acc, messages) => {
+        try {
+          const validMessages = MessagesByOrganizationSchema.parse(messages);
+          return this.deduplicateAndMergeMessages(acc, validMessages);
+        } catch (error) {
+          console.error('Invalid messages in storage:', error);
+          return acc;
+        }
+      }, defaultMessages);
     } catch (error) {
-      console.error('Invalid messages:', error);
+      console.error('Error merging messages:', error);
       return defaultMessages;
     }
   }
@@ -115,7 +131,19 @@ export class StorageService {
     // Merge with existing messages before saving
     const currentMessages = await this.loadAllMessages();
     const mergedMessages = this.deduplicateAndMergeMessages(currentMessages, validatedMessages);
-    await chrome.storage.local.set({ allMessages: mergedMessages });
+
+    // Save to all storage locations for compatibility
+    await chrome.storage.local.set({
+      allMessages: mergedMessages,
+      [this.STORAGE_KEY]: {
+        ...(await this.loadState()),
+        extractedMessages: mergedMessages,
+      },
+      [this.LEGACY_KEY]: {
+        ...(await this.loadState()),
+        extractedMessages: mergedMessages,
+      },
+    });
   }
 
   private deduplicateAndMergeMessages(
