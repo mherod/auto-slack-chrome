@@ -14,6 +14,12 @@ important discussions, creating documentation, or archiving conversations.
 - 🔗 Keeps message permalinks
 - 💾 Auto-saves progress
 - 🏃‍♂️ Handles follow-up messages smartly
+- 🔄 Auto-reload during development
+- ⚡ Optimized storage with caching
+- 🎨 Modern UI with loading states
+- 📜 Auto-scrolling with toggle
+- 🔒 Strong type safety with Zod
+- 🔁 Automatic state recovery
 
 ## 🚀 Getting Started
 
@@ -36,7 +42,7 @@ pnpm build
 
 ## 💻 Development
 
-Watch mode for live updates:
+Watch mode with auto-reload:
 
 ```bash
 pnpm watch
@@ -49,6 +55,8 @@ pnpm lint        # Check code style
 pnpm lint:fix    # Fix code style
 pnpm type-check  # Check types
 pnpm format      # Format code
+pnpm package     # Create distribution zip
+pnpm icons       # Generate extension icons
 ```
 
 ## 🎯 How to Use
@@ -57,7 +65,8 @@ pnpm format      # Format code
 2. Navigate to Slack in Chrome
 3. Click the extension icon
 4. Hit "Start Extraction" to begin
-5. Use "Download Messages" to save your data
+5. Toggle auto-scroll if needed
+6. Use "Download Messages" to save your data
 
 The extension will organize messages by:
 
@@ -71,19 +80,29 @@ The extension will organize messages by:
 src/
 ├── services/          # Core functionality
 │   └── extraction/    # Message extraction services
-├── background.ts      # Background script
+│       ├── connection.ts    # Background communication
+│       ├── message-extractor.ts  # Message parsing
+│       ├── monitor.ts      # Message monitoring
+│       ├── storage.ts      # State persistence
+│       ├── schemas.ts      # Zod schemas
+│       └── types.ts        # TypeScript types
+├── background.ts      # Service worker
 ├── content.ts         # Content script
-├── popup.ts          # Extension UI
+├── popup.ts          # Extension UI logic
+├── popup.html        # Extension UI markup
 └── manifest.json     # Extension config
 ```
 
 ## 🛠️ Tech Stack
 
-- TypeScript
+- TypeScript for type safety
 - Chrome Extensions API
-- Webpack
+- Webpack + webpack-ext-reloader
 - ESLint + Prettier
 - Husky + lint-staged
+- Zod for schema validation
+- date-fns for date handling
+- lodash for utilities
 
 ## 📝 Notes
 
@@ -91,3 +110,7 @@ src/
 - Only works with Slack's web app
 - Respects Slack's rate limits
 - Handles connection drops gracefully
+- Uses optimized storage with caching
+- Supports automatic extension reloading
+- Implements strict type checking
+- Features modern UI with loading states
