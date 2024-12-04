@@ -371,6 +371,50 @@ export class StorageService {
     );
   }
 
+  public async mergeTimeRange(
+    organization: string,
+    channel: string,
+    range: TimeRange,
+  ): Promise<TimeRange[]> {
+    const state = await this.loadState();
+    const ranges = state.extractedTimeRanges[organization]?.[channel] || [];
+    const TWENTY_MINUTES_MS = 20 * 60 * 1000;
+
+    // Add new range
+    ranges.push(range);
+
+    // Sort ranges by start time
+    const sortedRanges = sortBy(ranges, 'start');
+
+    // Merge overlapping or close ranges
+    const mergedRanges: TimeRange[] = [];
+    let currentRange = sortedRanges[0];
+
+    for (let i = 1; i < sortedRanges.length; i++) {
+      const nextRange = sortedRanges[i];
+      if (nextRange.start - currentRange.end <= TWENTY_MINUTES_MS) {
+        // Merge ranges
+        currentRange = {
+          start: Math.min(currentRange.start, nextRange.start),
+          end: Math.max(currentRange.end, nextRange.end),
+        };
+      } else {
+        mergedRanges.push(currentRange);
+        currentRange = nextRange;
+      }
+    }
+    mergedRanges.push(currentRange);
+
+    // Update state
+    if (!state.extractedTimeRanges[organization]) {
+      state.extractedTimeRanges[organization] = {};
+    }
+    state.extractedTimeRanges[organization][channel] = mergedRanges;
+    await this.saveState(state);
+
+    return mergedRanges;
+  }
+
   public async saveAllMessages(messages: MessagesByOrganization): Promise<void> {
     const startTime = performance.now();
     const metricsUpdate = this.updateMetrics();
