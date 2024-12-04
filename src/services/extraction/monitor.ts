@@ -454,33 +454,41 @@ export class MonitorService {
     try {
       // Try each scroll method sequentially instead of in parallel
       const scrollMethods = [
-        // Method 1: Direct scroll with style reset
+        // Method 1: Smooth scroll with animation
         async (): Promise<boolean> => {
           const beforeScroll = el.scrollTop;
-          const originalStyle = el.style.cssText;
+          const targetScroll = Math.max(0, el.scrollTop - amount);
+          const startTime = performance.now();
+          const duration = 400; // Duration in milliseconds
 
-          el.style.cssText = `
-            scroll-behavior: auto !important;
-            overflow-y: scroll !important;
-            height: ${el.clientHeight}px !important;
-            max-height: ${el.clientHeight}px !important;
-          `;
+          // Smooth scroll animation
+          const animate = async (): Promise<boolean> => {
+            const currentTime = performance.now();
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
 
-          el.scrollTop = Math.max(0, el.scrollTop - amount);
-          await this.nextTick();
-          const didScroll = el.scrollTop !== beforeScroll;
+            // Ease out cubic function for smooth deceleration
+            const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3);
+            const currentProgress = easeOut(progress);
 
-          // Restore original style
-          el.style.cssText = originalStyle;
+            el.scrollTop = beforeScroll - (beforeScroll - targetScroll) * currentProgress;
 
-          if (didScroll) {
-            this.lastScrollTime = Date.now();
-          }
+            if (progress < 1) {
+              await new Promise((resolve) => window.requestAnimationFrame(resolve));
+              return animate();
+            }
 
-          return didScroll;
+            const didScroll = el.scrollTop !== beforeScroll;
+            if (didScroll) {
+              this.lastScrollTime = Date.now();
+            }
+            return didScroll;
+          };
+
+          return animate();
         },
 
-        // Method 2: ScrollIntoView on unextracted message
+        // Method 2: ScrollIntoView with smooth behavior
         async (): Promise<boolean> => {
           const unextractedMessage = el.querySelector(
             `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
@@ -488,31 +496,55 @@ export class MonitorService {
 
           if (unextractedMessage instanceof HTMLElement) {
             const beforeScroll = el.scrollTop;
-            unextractedMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
-            await this.nextTick();
-            const didScroll = el.scrollTop !== beforeScroll;
+            unextractedMessage.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+            });
 
+            // Wait for smooth scroll to complete
+            await new Promise((resolve) => setTimeout(resolve, 400));
+
+            const didScroll = el.scrollTop !== beforeScroll;
             if (didScroll) {
               this.lastScrollTime = Date.now();
             }
-
             return didScroll;
           }
           return false;
         },
 
-        // Method 3: Force scroll with multiplier
+        // Method 3: Force scroll with multiplier (fallback)
         async (): Promise<boolean> => {
           const beforeScroll = el.scrollTop;
-          el.scrollTop = Math.max(0, el.scrollTop - amount * this.FORCE_SCROLL_MULTIPLIER);
-          await this.nextTick();
-          const didScroll = el.scrollTop !== beforeScroll;
+          const targetScroll = Math.max(0, el.scrollTop - amount * this.FORCE_SCROLL_MULTIPLIER);
 
-          if (didScroll) {
-            this.lastScrollTime = Date.now();
-          }
+          // Even for force scroll, use smooth animation
+          const startTime = performance.now();
+          const duration = 300; // Shorter duration for force scroll
 
-          return didScroll;
+          const animate = async (): Promise<boolean> => {
+            const currentTime = performance.now();
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            const easeOut = (t: number): number => 1 - Math.pow(1 - t, 2);
+            const currentProgress = easeOut(progress);
+
+            el.scrollTop = beforeScroll - (beforeScroll - targetScroll) * currentProgress;
+
+            if (progress < 1) {
+              await new Promise((resolve) => window.requestAnimationFrame(resolve));
+              return animate();
+            }
+
+            const didScroll = el.scrollTop !== beforeScroll;
+            if (didScroll) {
+              this.lastScrollTime = Date.now();
+            }
+            return didScroll;
+          };
+
+          return animate();
         },
       ];
 
