@@ -231,6 +231,53 @@
         opacity: 0.7;
         cursor: progress;
       }
+
+      .time-ranges {
+        margin-top: 8px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+
+      .time-ranges-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: normal;
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .time-ranges-list {
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.4;
+      }
+
+      .time-range-item {
+        display: flex;
+        flex-direction: column;
+        padding: 8px;
+        background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+        border-radius: 4px;
+        margin-bottom: 8px;
+      }
+
+      .time-range-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .time-range-channel {
+        font-weight: 500;
+        margin-bottom: 4px;
+      }
+
+      .time-range-dates {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .loading .time-ranges-list.skeleton {
+        height: 60px;
+      }
     </style>
   </head>
   <body>
@@ -262,6 +309,13 @@
         <div class="channel-info">
           <span class="channel-label">Current channel</span>
           <span id="channelInfo" class="channel-value skeleton">None</span>
+        </div>
+
+        <div class="time-ranges">
+          <span class="time-ranges-label">Extracted time ranges</span>
+          <div id="timeRanges" class="time-ranges-list skeleton">
+            No ranges extracted
+          </div>
         </div>
       </div>
     </div>

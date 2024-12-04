@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusText = document.getElementById('statusText') as HTMLSpanElement;
   const messageCount = document.getElementById('messageCount') as HTMLSpanElement;
   const channelInfo = document.getElementById('channelInfo') as HTMLSpanElement;
+  const timeRanges = document.getElementById('timeRanges') as HTMLDivElement;
   const scrollingToggle = document.getElementById('scrollingToggle') as HTMLInputElement;
   const container = document.querySelector('.container') as HTMLDivElement;
 
@@ -63,18 +64,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
+  const formatTimeRange = (start: number, end: number): string => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+
+    // If same day, show single date with time range
+    if (startDate.toDateString() === endDate.toDateString()) {
+      return `${format(startDate, 'MMM d, yyyy')} ${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
+    }
+
+    // Different days, show full range
+    return `${format(startDate, 'MMM d, yyyy HH:mm')} - ${format(endDate, 'MMM d, yyyy HH:mm')}`;
+  };
+
+  const updateTimeRanges = (state: Awaited<ReturnType<typeof storageService.loadState>>): void => {
+    if (!timeRanges) return;
+
+    const ranges = state.extractedTimeRanges;
+    if (!ranges || Object.keys(ranges).length === 0) {
+      timeRanges.innerHTML = 'No ranges extracted';
+      return;
+    }
+
+    const rangeElements: string[] = [];
+
+    for (const [org, orgRanges] of Object.entries(ranges)) {
+      for (const [channel, channelRanges] of Object.entries(orgRanges)) {
+        if (channelRanges.length === 0) continue;
+
+        const channelDisplay = channel.startsWith('DM: ') ? channel.substring(4) : `#${channel}`;
+        const rangeStrings = channelRanges
+          .sort((a, b) => b.end - a.end) // Most recent first
+          .map((range) => formatTimeRange(range.start, range.end));
+
+        rangeElements.push(`
+          <div class="time-range-item">
+            <div class="time-range-channel">${org} / ${channelDisplay}</div>
+            <div class="time-range-dates">${rangeStrings.join('<br>')}</div>
+          </div>
+        `);
+      }
+    }
+
+    if (rangeElements.length === 0) {
+      timeRanges.innerHTML = 'No ranges extracted';
+    } else {
+      timeRanges.innerHTML = rangeElements.join('');
+    }
+  };
+
   const setLoading = (loading: boolean): void => {
     isLoading = loading;
     if (loading) {
       container.classList.add('loading');
       messageCount.classList.add('skeleton');
       channelInfo.classList.add('skeleton');
+      timeRanges.classList.add('skeleton');
       toggleButton.disabled = true;
       downloadButton.disabled = true;
     } else {
       container.classList.remove('loading');
       messageCount.classList.remove('skeleton');
       channelInfo.classList.remove('skeleton');
+      timeRanges.classList.remove('skeleton');
       toggleButton.disabled = false;
       downloadButton.disabled = totalMessages <= 0;
     }
@@ -115,6 +167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         .reduce((acc, messages) => acc + messages.length, 0);
 
       messageCount.textContent = totalMessages.toLocaleString();
+      updateTimeRanges(state);
       updateUI();
     } catch (error) {
       console.error('Failed to initialize state:', error);
@@ -213,7 +266,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Listen for updates from content script
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener(async (message) => {
     if (message.type === 'STATE_UPDATE') {
       isExtracting = message.isExtracting;
       if (message.currentChannel) {
@@ -226,6 +279,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       totalMessages = message.messageCount;
       messageCount.textContent = totalMessages.toLocaleString();
+
+      // Update time ranges when state changes
+      const state = await storageService.loadState();
+      updateTimeRanges(state);
       updateUI();
     }
   });

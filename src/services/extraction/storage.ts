@@ -3,6 +3,17 @@ import { z } from 'zod';
 import { MessagesByOrganizationSchema } from './schemas';
 import type { ChannelInfo, MessagesByOrganization, SlackMessage } from './types';
 
+interface TimeRange {
+  start: number;
+  end: number;
+}
+
+interface ExtractedTimeRanges {
+  [organization: string]: {
+    [channel: string]: TimeRange[];
+  };
+}
+
 const StorageStateSchema = z.object({
   isExtracting: z.boolean(),
   currentChannel: z.union([
@@ -14,6 +25,20 @@ const StorageStateSchema = z.object({
   ]),
   extractedMessages: MessagesByOrganizationSchema,
   isScrollingEnabled: z.boolean().default(true),
+  extractedTimeRanges: z
+    .record(
+      z.string(),
+      z.record(
+        z.string(),
+        z.array(
+          z.object({
+            start: z.number(),
+            end: z.number(),
+          }),
+        ),
+      ),
+    )
+    .default({}),
 });
 
 type StorageState = z.infer<typeof StorageStateSchema>;
@@ -134,6 +159,19 @@ export class StorageService {
       const endTime = performance.now();
       this.metrics.readTimes.push(endTime - startTime);
       await metricsUpdate;
+
+      // Ensure ranges are in sync with messages
+      if (
+        Object.keys(this.cachedState.extractedMessages).length > 0 &&
+        (!this.cachedState.extractedTimeRanges ||
+          Object.keys(this.cachedState.extractedTimeRanges).length === 0)
+      ) {
+        this.cachedState.extractedTimeRanges = this.updateTimeRanges(
+          this.cachedState.extractedMessages,
+        );
+        await this.saveState(this.cachedState);
+      }
+
       return this.cachedState;
     }
 
@@ -141,6 +179,19 @@ export class StorageService {
 
     if (this.STORAGE_KEY in data && data[this.STORAGE_KEY] !== null) {
       this.cachedState = await StorageStateSchema.parseAsync(data[this.STORAGE_KEY]);
+
+      // Ensure ranges are in sync with messages
+      if (
+        Object.keys(this.cachedState.extractedMessages).length > 0 &&
+        (!this.cachedState.extractedTimeRanges ||
+          Object.keys(this.cachedState.extractedTimeRanges).length === 0)
+      ) {
+        this.cachedState.extractedTimeRanges = this.updateTimeRanges(
+          this.cachedState.extractedMessages,
+        );
+        await this.saveState(this.cachedState);
+      }
+
       const endTime = performance.now();
       this.metrics.readTimes.push(endTime - startTime);
       await metricsUpdate;
@@ -153,6 +204,7 @@ export class StorageService {
       currentChannel: null,
       extractedMessages: {},
       isScrollingEnabled: true,
+      extractedTimeRanges: {},
     });
     const endTime = performance.now();
     this.metrics.readTimes.push(endTime - startTime);
@@ -215,6 +267,76 @@ export class StorageService {
     return state.extractedMessages;
   }
 
+  private updateTimeRanges(messages: MessagesByOrganization): ExtractedTimeRanges {
+    const timeRanges: ExtractedTimeRanges = {};
+
+    for (const [org, orgData] of Object.entries(messages)) {
+      timeRanges[org] = {};
+
+      for (const [channel, channelData] of Object.entries(orgData)) {
+        const ranges: TimeRange[] = [];
+        let currentRange: TimeRange | null = null;
+
+        // Flatten and sort all messages by timestamp
+        const sortedMessages = flatMap(Object.values(channelData))
+          .filter((msg): msg is SlackMessage & { timestamp: string } => msg.timestamp !== null)
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        for (const message of sortedMessages) {
+          const timestamp = new Date(message.timestamp).getTime();
+
+          if (!currentRange) {
+            currentRange = { start: timestamp, end: timestamp };
+          } else if (timestamp - currentRange.end <= 60000) {
+            // Within 1 minute
+            currentRange.end = timestamp;
+          } else {
+            ranges.push(currentRange);
+            currentRange = { start: timestamp, end: timestamp };
+          }
+        }
+
+        if (currentRange) {
+          ranges.push(currentRange);
+        }
+
+        // Merge overlapping ranges
+        if (ranges.length > 0) {
+          const mergedRanges: TimeRange[] = [ranges[0]];
+
+          for (let i = 1; i < ranges.length; i++) {
+            const current = ranges[i];
+            const previous = mergedRanges[mergedRanges.length - 1];
+
+            if (current.start - previous.end <= 60000) {
+              previous.end = Math.max(previous.end, current.end);
+            } else {
+              mergedRanges.push(current);
+            }
+          }
+
+          timeRanges[org][channel] = mergedRanges;
+        }
+      }
+    }
+
+    return timeRanges;
+  }
+
+  public isTimeRangeExtracted(organization: string, channel: string, timestamp: number): boolean {
+    const state = this.cachedState;
+    if (!state) return false;
+
+    const ranges = state.extractedTimeRanges[organization]?.[channel];
+    if (!ranges) return false;
+
+    return ranges.some(
+      (range) =>
+        timestamp >= range.start - 60000 && // Include 1-minute buffer
+        timestamp <= range.end + 60000,
+    );
+  }
+
   public async saveAllMessages(messages: MessagesByOrganization): Promise<void> {
     const startTime = performance.now();
     const metricsUpdate = this.updateMetrics();
@@ -224,6 +346,7 @@ export class StorageService {
     // Update cached state
     if (this.cachedState) {
       this.cachedState.extractedMessages = validatedMessages;
+      this.cachedState.extractedTimeRanges = this.updateTimeRanges(validatedMessages);
     }
 
     // Schedule the write operation
@@ -235,6 +358,7 @@ export class StorageService {
         [this.STORAGE_KEY]: {
           ...loadedState,
           extractedMessages: validatedMessages,
+          extractedTimeRanges: this.updateTimeRanges(validatedMessages),
         },
       });
 
