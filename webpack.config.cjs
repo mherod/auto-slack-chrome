@@ -1,5 +1,6 @@
 const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
+const ExtReloader = require('webpack-ext-reloader');
 
 module.exports = {
   mode: 'development',
@@ -45,5 +46,14 @@ module.exports = {
         },
       ],
     }),
-  ],
+    process.env.WEBPACK_WATCH && new ExtReloader({
+      port: 9090,
+      reloadPage: true,
+      entries: {
+        background: 'background',
+        contentScript: 'content',
+        extensionPage: 'popup',
+      }
+    }),
+  ].filter(Boolean),
 };

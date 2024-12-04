@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "webpack --config webpack.config.cjs",
-    "watch": "webpack --config webpack.config.cjs --watch",
+    "watch": "cross-env WEBPACK_WATCH=true webpack --config webpack.config.cjs --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint --config eslint.config.cjs src/**/*.ts",
     "lint:fix": "eslint --config eslint.config.cjs src/**/*.ts --fix",
@@ -54,6 +54,7 @@
     "@typescript-eslint/eslint-plugin": "^8.17.0",
     "@typescript-eslint/parser": "^8.17.0",
     "copy-webpack-plugin": "^12.0.2",
+    "cross-env": "7.0.3",
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
     "husky": "^9.0.11",
@@ -63,7 +64,8 @@
     "ts-loader": "^9.5.1",
     "typescript": "^5.7.2",
     "webpack": "^5.96.1",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^5.1.4",
+    "webpack-ext-reloader": "1.1.13"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
