@@ -750,8 +750,8 @@ export class MonitorService {
 
       if (messageElements.length === 0) return;
 
-      // Process messages in dynamic chunks based on viewport size
-      const messages = Array.from(messageElements);
+      // Process messages in dynamic chunks from bottom to top
+      const messages = Array.from(messageElements).reverse(); // Reverse to process bottom-to-top
       const viewportHeight = window.innerHeight;
       const avgMessageHeight = 50; // Approximate average height of a message
       const messagesInViewport = Math.ceil(viewportHeight / avgMessageHeight);
@@ -762,11 +762,12 @@ export class MonitorService {
 
       for (let i = 0; i < messages.length; i += chunkSize) {
         const chunk = messages.slice(i, i + chunkSize);
-        this.log('Processing message chunk', {
+        this.log('Processing message chunk (bottom-to-top)', {
           chunk: i / chunkSize + 1,
           totalChunks: Math.ceil(messages.length / chunkSize),
           chunkSize: chunk.length,
           viewportMessages: messagesInViewport,
+          direction: 'bottom-to-top',
         });
 
         const extractionPromises = chunk.map(async (listItem) => {
