@@ -270,7 +270,7 @@ export class StorageService {
   private updateTimeRanges(messages: MessagesByOrganization): ExtractedTimeRanges {
     const timeRanges: ExtractedTimeRanges = {};
     const TWENTY_MINUTES_MS = 20 * 60 * 1000; // 20 minutes in milliseconds
-    const MAX_RANGES = 30;
+    const MAX_RANGES = 10;
 
     for (const [org, orgData] of Object.entries(messages)) {
       timeRanges[org] = {};
@@ -318,44 +318,34 @@ export class StorageService {
             }
           }
 
-          // Keep merging ranges in the middle until we're under the limit
+          // Keep merging ranges until we're under the limit
           while (mergedRanges.length > MAX_RANGES) {
-            // Find the ranges with the smallest gap between them
+            // Find the pair of ranges with the smallest gap between them
             let smallestGap = Infinity;
             let smallestGapIndex = -1;
 
-            for (let i = 1; i < mergedRanges.length - 1; i++) {
-              const gapBefore = mergedRanges[i].start - mergedRanges[i - 1].end;
-              const gapAfter = mergedRanges[i + 1].start - mergedRanges[i].end;
-
-              // Consider both gaps around this range
-              const totalGap = gapBefore + gapAfter;
-              if (totalGap < smallestGap) {
-                smallestGap = totalGap;
+            for (let i = 0; i < mergedRanges.length - 1; i++) {
+              const gap = mergedRanges[i + 1].start - mergedRanges[i].end;
+              if (gap < smallestGap) {
+                smallestGap = gap;
                 smallestGapIndex = i;
               }
             }
 
-            if (smallestGapIndex > 0) {
-              // Merge three consecutive ranges at the smallest gap
+            if (smallestGapIndex >= 0) {
+              // Merge the ranges with the smallest gap
               const mergedRange = {
-                start: mergedRanges[smallestGapIndex - 1].start,
+                start: mergedRanges[smallestGapIndex].start,
                 end: mergedRanges[smallestGapIndex + 1].end,
               };
-
-              // Replace three ranges with the merged one
-              mergedRanges.splice(smallestGapIndex - 1, 3, mergedRange);
+              mergedRanges.splice(smallestGapIndex, 2, mergedRange);
             } else {
-              // Fallback: merge the middle ranges if we can't find good gaps
-              const midPoint = Math.floor(mergedRanges.length / 2);
-              const startMergeIndex = midPoint - 1;
-
+              // Fallback: merge oldest ranges if we can't find gaps
               const mergedRange = {
-                start: mergedRanges[startMergeIndex].start,
-                end: mergedRanges[startMergeIndex + 2].end,
+                start: mergedRanges[0].start,
+                end: mergedRanges[1].end,
               };
-
-              mergedRanges.splice(startMergeIndex, 3, mergedRange);
+              mergedRanges.splice(0, 2, mergedRange);
             }
           }
 
