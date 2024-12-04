@@ -11,19 +11,177 @@ import {
 export class MessageExtractor {
   private lastKnownSender: LastKnownSender | null = null;
 
+  private log(message: string, data?: unknown): void {
+    console.log(`[Slack Extractor] ${message}`, data ?? '');
+  }
+
+  private isScrollableContainer(element: Element): boolean {
+    if (!(element instanceof HTMLElement)) return false;
+
+    const style = window.getComputedStyle(element);
+
+    // Check for scrollability in multiple ways
+    const hasScroll =
+      style.overflowY === 'scroll' ||
+      style.overflowY === 'auto' ||
+      element.scrollHeight > element.clientHeight ||
+      element.classList.contains('c-virtual_list__scroll_container') ||
+      element.classList.contains('p-workspace__primary_view_body');
+
+    const hasHeight = element.clientHeight > 100; // Ensure it's a significant container
+
+    const hasMessages = element.querySelectorAll('[data-qa="message-text"]').length > 0;
+    const hasVirtualItems = element.querySelectorAll('[data-qa="virtual-list-item"]').length > 0;
+    const hasMessageBlocks = element.querySelectorAll('.c-message_kit__blocks').length > 0;
+    const hasMessageContent = hasMessages || hasVirtualItems || hasMessageBlocks;
+
+    // Check for Slack's specific message pane classes
+    const isMessagePane =
+      element.classList.contains('p-message_pane') ||
+      (element.hasAttribute('data-qa') && element.getAttribute('data-qa') === 'message_pane');
+
+    const isPrimaryContainer =
+      isMessagePane ||
+      element.classList.contains('p-workspace__primary_view_body') ||
+      element.classList.contains('c-virtual_list__scroll_container');
+
+    this.log('Checking container candidate', {
+      element: element.className,
+      hasScroll,
+      hasHeight,
+      height: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      hasMessages,
+      hasVirtualItems,
+      hasMessageBlocks,
+      isPrimaryContainer,
+      isMessagePane,
+      overflowY: style.overflowY,
+      dataQa: element.getAttribute('data-qa'),
+    });
+
+    // For message panes, we're more lenient with the requirements
+    if (isMessagePane) {
+      return hasHeight && hasMessageContent;
+    }
+
+    return hasScroll && hasHeight && hasMessageContent && isPrimaryContainer;
+  }
+
   public getMessageContainer(): Element | null {
+    this.log('Starting container search');
+
+    // First try to find the message pane directly
+    const messagePane = document.querySelector('.p-message_pane');
+    if (messagePane instanceof HTMLElement) {
+      this.log('Found message pane directly', {
+        className: messagePane.className,
+        height: messagePane.clientHeight,
+        scrollHeight: messagePane.scrollHeight,
+      });
+
+      if (this.isScrollableContainer(messagePane)) {
+        return messagePane;
+      }
+    }
+
+    // Then try to find the scroll container
+    const scrollContainer = document.querySelector('.c-virtual_list__scroll_container');
+    if (scrollContainer instanceof HTMLElement) {
+      this.log('Found scroll container directly', {
+        className: scrollContainer.className,
+        height: scrollContainer.clientHeight,
+        scrollHeight: scrollContainer.scrollHeight,
+      });
+
+      if (this.isScrollableContainer(scrollContainer)) {
+        return scrollContainer;
+      }
+    }
+
+    // Rest of the existing search logic...
+    const allDivs = document.querySelectorAll('div');
+    this.log(`Found ${allDivs.length} divs to check`);
+
+    const potentialContainers: Element[] = [];
+
+    for (const div of allDivs) {
+      if (this.isScrollableContainer(div)) {
+        this.log('Found potential container', {
+          className: div.className,
+          id: div.id,
+          messageCount: div.querySelectorAll('[data-qa="message-text"]').length,
+          height: (div as HTMLElement).clientHeight,
+          scrollHeight: (div as HTMLElement).scrollHeight,
+        });
+        potentialContainers.push(div);
+      }
+    }
+
+    this.log(`Found ${potentialContainers.length} potential containers`);
+
+    // If we found multiple containers, prefer the one with more messages
+    if (potentialContainers.length > 0) {
+      const bestContainer = potentialContainers.reduce((best, current) => {
+        const bestMessages = best.querySelectorAll('[data-qa="message-text"]').length;
+        const currentMessages = current.querySelectorAll('[data-qa="message-text"]').length;
+        return currentMessages > bestMessages ? current : best;
+      });
+
+      this.log('Selected best container', {
+        className: bestContainer.className,
+        id: bestContainer.id,
+        messageCount: bestContainer.querySelectorAll('[data-qa="message-text"]').length,
+        height: (bestContainer as HTMLElement).clientHeight,
+        scrollHeight: (bestContainer as HTMLElement).scrollHeight,
+      });
+
+      return bestContainer;
+    }
+
+    // Fallback to known Slack container classes if no scrollable container found
+    this.log('No containers found, trying fallback selectors');
+
     const selectors = [
-      '.p-workspace__primary_view_contents',
+      '.p-message_pane.p-message_pane--classic-nav',
+      '.p-message_pane',
+      '.p-message_pane--with-bookmarks-bar',
       '.c-virtual_list__scroll_container',
+      '[data-qa="message_pane"]',
+      '[data-qa="virtual_list"]',
+      '.p-workspace__primary_view_contents',
       '.p-workspace__primary_view_body',
       '.c-search__results_container',
     ];
 
     for (const selector of selectors) {
       const container = document.querySelector(selector);
-      if (container !== null) return container;
+      if (container !== null) {
+        this.log('Checking fallback selector', {
+          selector,
+          found: true,
+          className: container.className,
+          id: container.id,
+        });
+
+        if (this.isScrollableContainer(container)) {
+          this.log('Found valid container via fallback', {
+            selector,
+            className: container.className,
+            id: container.id,
+            messageCount: container.querySelectorAll('[data-qa="message-text"]').length,
+          });
+          return container;
+        }
+      } else {
+        this.log('Checking fallback selector', {
+          selector,
+          found: false,
+        });
+      }
     }
 
+    this.log('No valid container found');
     return null;
   }
 
