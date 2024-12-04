@@ -50,6 +50,26 @@ const handleContextInvalidation = (): void => {
   }, RETRY_DELAY * retryCount); // Exponential backoff
 };
 
+const initializeState = async (): Promise<void> => {
+  try {
+    const state = await storageService.loadState();
+
+    // If we were previously extracting, resume
+    if (state.isExtracting) {
+      void monitorService.startMonitoring().catch((error) => {
+        if (isContextInvalidated(error)) {
+          handleContextInvalidation();
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Failed to initialize state:', error);
+    if (isContextInvalidated(error)) {
+      handleContextInvalidation();
+    }
+  }
+};
+
 const initializeServices = (): void => {
   try {
     // Initialize services
@@ -98,6 +118,9 @@ const initializeServices = (): void => {
 
     // Initialize connection
     connectionService.initializeConnection();
+
+    // Initialize state and check if we should resume extraction
+    void initializeState();
 
     // Reset retry count on successful initialization
     retryCount = 0;
