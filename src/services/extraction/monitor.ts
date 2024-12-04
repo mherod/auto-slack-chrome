@@ -18,14 +18,14 @@ export class MonitorService {
   private readonly POLLING_INTERVAL_MS = 2000;
   private readonly TITLE_CHECK_INTERVAL_MS = 5000;
   private readonly RECONNECT_CHECK_INTERVAL_MS = 7500;
-  private readonly AUTO_SCROLL_STEP = 600;
-  private readonly AUTO_SCROLL_INTERVAL_MS = 400;
-  private readonly SCROLL_PAUSE_MS = 500;
-  private readonly MAX_SCROLL_ATTEMPTS = 75;
+  private readonly AUTO_SCROLL_STEP = 300;
+  private readonly AUTO_SCROLL_INTERVAL_MS = 200;
+  private readonly SCROLL_PAUSE_MS = 250;
+  private readonly MAX_SCROLL_ATTEMPTS = 150;
   private readonly SCROLL_THRESHOLD = 100;
-  private readonly MAX_WAIT_FOR_MESSAGES_MS = 2000;
+  private readonly MAX_WAIT_FOR_MESSAGES_MS = 1500;
   private readonly MAX_CONSECUTIVE_FAILURES = 3;
-  private readonly FORCE_SCROLL_MULTIPLIER = 1.5;
+  private readonly FORCE_SCROLL_MULTIPLIER = 2;
   private autoScrollInterval: number | null = null;
   private lastScrollPosition: number = 0;
   private scrollAttempts: number = 0;
@@ -459,7 +459,7 @@ export class MonitorService {
           const beforeScroll = el.scrollTop;
           const targetScroll = Math.max(0, el.scrollTop - amount);
           const startTime = performance.now();
-          const duration = 400; // Duration in milliseconds
+          const duration = 200; // Reduced from 400 for faster animation
 
           // Smooth scroll animation
           const animate = async (): Promise<boolean> => {
@@ -502,7 +502,7 @@ export class MonitorService {
             });
 
             // Wait for smooth scroll to complete
-            await new Promise((resolve) => setTimeout(resolve, 400));
+            await new Promise((resolve) => setTimeout(resolve, 200)); // Reduced from 400
 
             const didScroll = el.scrollTop !== beforeScroll;
             if (didScroll) {
@@ -520,7 +520,7 @@ export class MonitorService {
 
           // Even for force scroll, use smooth animation
           const startTime = performance.now();
-          const duration = 300; // Shorter duration for force scroll
+          const duration = 150; // Reduced from 300 for faster force scroll
 
           const animate = async (): Promise<boolean> => {
             const currentTime = performance.now();
@@ -633,12 +633,10 @@ export class MonitorService {
     // Check if auto-scroll is enabled in storage
     const state = await this.storageService.loadState();
     if (!state.isScrollingEnabled) {
-      this.log('Auto-scroll is disabled in storage, skipping');
       return;
     }
 
     if (this.isAutoScrolling) {
-      this.log('Already auto-scrolling, skipping');
       return;
     }
 
@@ -651,7 +649,6 @@ export class MonitorService {
         // Check if auto-scroll was disabled while running
         const currentState = await this.storageService.loadState();
         if (!currentState.isScrollingEnabled) {
-          this.log('Auto-scroll was disabled while running, stopping');
           break;
         }
 
@@ -667,17 +664,9 @@ export class MonitorService {
         const scrollableElement = await this.findAndScrollElement();
 
         if (!scrollableElement) {
-          this.log('No scrollable element found, retrying...');
           await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
           continue;
         }
-
-        this.log('Scrolling attempt', {
-          attempt: this.scrollAttempts + 1,
-          maxAttempts: this.MAX_SCROLL_ATTEMPTS,
-          element: scrollableElement.className,
-          consecutiveNoNewMessages,
-        });
 
         // Try to scroll
         const scrolled = await this.attemptScrollOnElement(
@@ -687,10 +676,8 @@ export class MonitorService {
 
         if (!scrolled) {
           consecutiveNoNewMessages++;
-          this.log('Failed to scroll', { consecutiveNoNewMessages });
 
           if (consecutiveNoNewMessages >= this.MAX_CONSECUTIVE_FAILURES) {
-            this.log('Too many consecutive failures, stopping');
             break;
           }
 
@@ -721,32 +708,21 @@ export class MonitorService {
         this.scrollAttempts++;
       }
     } catch (error) {
-      this.log('Error during auto-scroll', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      console.error('Error during auto-scroll:', error);
     } finally {
       this.isAutoScrolling = false;
-      this.log('Auto-scroll complete', {
-        attempts: this.scrollAttempts,
-        consecutiveNoNewMessages,
-      });
     }
   }
 
   private async extractMessages(): Promise<void> {
     if (this.isExtracting || this.currentChannelInfo === null) {
-      this.log('Skipping extraction', {
-        reason: this.isExtracting ? 'already_extracting' : 'no_channel_info',
-      });
       return;
     }
 
     this.isExtracting = true;
-    this.log('Starting message extraction');
 
     try {
       const messageElements = document.querySelectorAll('[data-qa="virtual-list-item"]');
-      this.log('Found message elements', { count: messageElements.length });
 
       if (messageElements.length === 0) return;
 
@@ -762,13 +738,6 @@ export class MonitorService {
 
       for (let i = 0; i < messages.length; i += chunkSize) {
         const chunk = messages.slice(i, i + chunkSize);
-        this.log('Processing message chunk (bottom-to-top)', {
-          chunk: i / chunkSize + 1,
-          totalChunks: Math.ceil(messages.length / chunkSize),
-          chunkSize: chunk.length,
-          viewportMessages: messagesInViewport,
-          direction: 'bottom-to-top',
-        });
 
         const extractionPromises = chunk.map(async (listItem) => {
           if (!(listItem instanceof HTMLElement)) return;
@@ -851,13 +820,11 @@ export class MonitorService {
         // Check if extraction should continue
         const state = await this.storageService.loadState();
         if (!state.isScrollingEnabled && this.isAutoScrolling) {
-          this.log('Stopping extraction due to disabled auto-scroll');
           break;
         }
       }
     } finally {
       this.isExtracting = false;
-      this.log('Message extraction complete');
     }
   }
 
