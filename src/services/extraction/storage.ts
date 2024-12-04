@@ -45,9 +45,7 @@ type StorageState = z.infer<typeof StorageStateSchema>;
 
 export class StorageService {
   private readonly STORAGE_KEY = 'slack-extractor-state';
-  private readonly LEGACY_KEY = 'extensionState';
   private readonly METRICS_KEY = 'storage-metrics';
-  private readonly MIGRATION_COMPLETE_KEY = 'migration-complete';
   private cachedState: StorageState | null = null;
   private pendingWrites: Array<() => Promise<void>> = [];
   private writeTimeout: number | null = null;
@@ -113,47 +111,9 @@ export class StorageService {
     }
   }
 
-  private async migrateFromLegacy(): Promise<void> {
-    const migrationComplete = await chrome.storage.local.get(this.MIGRATION_COMPLETE_KEY);
-    if (migrationComplete[this.MIGRATION_COMPLETE_KEY]) {
-      return;
-    }
-
-    const data = await chrome.storage.local.get([this.LEGACY_KEY, 'allMessages']);
-
-    if (data[this.LEGACY_KEY]) {
-      const legacyState = data[this.LEGACY_KEY];
-      const migratedState = {
-        isExtracting: legacyState.isExtracting ?? false,
-        currentChannel: legacyState.currentChannel ?? null,
-        extractedMessages: legacyState.extractedMessages ?? {},
-        isScrollingEnabled: true,
-      };
-
-      // Validate before saving
-      const validatedState = await StorageStateSchema.parseAsync(migratedState);
-
-      // Save to new key
-      await chrome.storage.local.set({
-        [this.STORAGE_KEY]: validatedState,
-      });
-
-      // Clean up legacy data
-      await chrome.storage.local.remove([this.LEGACY_KEY, 'allMessages']);
-    }
-
-    // Mark migration as complete
-    await chrome.storage.local.set({
-      [this.MIGRATION_COMPLETE_KEY]: true,
-    });
-  }
-
   public async loadState(): Promise<StorageState> {
     const startTime = performance.now();
     const metricsUpdate = this.updateMetrics();
-
-    // Run migration if needed
-    await this.migrateFromLegacy();
 
     if (this.cachedState !== null) {
       const endTime = performance.now();
@@ -216,40 +176,21 @@ export class StorageService {
     const startTime = performance.now();
     const metricsUpdate = this.updateMetrics();
 
-    const result = await chrome.storage.local.get([
-      'allMessages',
-      this.STORAGE_KEY,
-      this.LEGACY_KEY,
-    ]);
-
+    const result = await chrome.storage.local.get(this.STORAGE_KEY);
+    const messages = result[this.STORAGE_KEY]?.extractedMessages;
     const defaultMessages: MessagesByOrganization = {};
 
-    // Try loading from each possible location
-    const possibleMessages = [
-      result.allMessages,
-      result[this.STORAGE_KEY]?.extractedMessages,
-      result[this.LEGACY_KEY]?.extractedMessages,
-    ].filter((messages): boolean => {
-      if (typeof messages !== 'object' || messages === null) return false;
-      try {
-        MessagesByOrganizationSchema.parse(messages);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-
     try {
-      // Merge all valid message sources
-      const merged = possibleMessages.reduce((acc, messages) => {
-        return this.deduplicateAndMergeMessages(acc, messages);
-      }, defaultMessages);
-      const endTime = performance.now();
-      this.metrics.readTimes.push(endTime - startTime);
-      await metricsUpdate;
-      return merged;
+      if (typeof messages === 'object' && messages !== null) {
+        MessagesByOrganizationSchema.parse(messages);
+        const endTime = performance.now();
+        this.metrics.readTimes.push(endTime - startTime);
+        await metricsUpdate;
+        return messages;
+      }
+      return defaultMessages;
     } catch (error) {
-      console.error('Error merging messages:', error);
+      console.error('Error loading messages:', error);
       const endTime = performance.now();
       this.metrics.readTimes.push(endTime - startTime);
       await metricsUpdate;
