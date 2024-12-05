@@ -535,13 +535,13 @@ export class MessageExtractor {
       if (!savedIndicator) {
         savedIndicator = document.createElement('span');
         savedIndicator.className = 'saved-indicator';
-        savedIndicator.textContent = '• Saved';
+        savedIndicator.textContent = '✓';
         timestampElement.insertAdjacentElement('afterend', savedIndicator);
       }
 
       // Update text to show range status if provided
       if (typeof isInRange === 'boolean') {
-        savedIndicator.textContent = isInRange ? '• Saved (in range)' : '• Saved';
+        savedIndicator.textContent = isInRange ? '✓✓' : '✓';
       }
     }
   }
@@ -553,7 +553,7 @@ export class MessageExtractor {
     if (timestampElement instanceof HTMLElement) {
       const savedIndicator = timestampElement.nextElementSibling;
       if (savedIndicator?.classList.contains('saved-indicator')) {
-        savedIndicator.textContent = isInRange ? '• Saved (in range)' : '• Saved';
+        savedIndicator.textContent = isInRange ? '✓✓' : '✓';
       }
     }
   }

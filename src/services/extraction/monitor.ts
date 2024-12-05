@@ -61,14 +61,15 @@ export class MonitorService {
     style.id = styleId;
     style.textContent = `
       .saved-indicator {
-        margin-left: 6px;
+        margin-left: 4px;
         color: var(--sk_foreground_max_solid, #4a154b);
         opacity: 0.7;
         font-size: 12px;
-        font-style: italic;
         user-select: none;
         pointer-events: none;
         vertical-align: baseline;
+        display: inline-flex;
+        align-items: center;
       }
 
       .auto-slack-scroll-container {
