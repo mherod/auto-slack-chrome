@@ -35,6 +35,15 @@ export class MonitorService {
   private readonly MAX_IDLE_TIME_MS = 10000;
   private lastScrollTime: number = Date.now();
 
+  private readonly OBSERVER_LEVELS = {
+    CONTAINER: 'container',
+    MESSAGE_LIST: 'messageList',
+    MESSAGE_ITEM: 'messageItem',
+    MESSAGE_CONTENT: 'messageContent',
+  } as const;
+
+  private observers: Map<string, MutationObserver> = new Map();
+
   public constructor(
     private readonly messageExtractor: MessageExtractor,
     private readonly storageService: StorageService,
@@ -259,42 +268,188 @@ export class MonitorService {
 
   private setupMessageObserver(): void {
     const container = this.messageExtractor.getMessageContainer();
-    if (container !== null) {
-      // Clean up existing observer if it exists
-      if (this.observer !== null) {
-        this.observer.disconnect();
-      }
+    if (container === null) return;
 
-      this.observer = new MutationObserver((mutations) => {
-        if (!this.isExtracting) {
-          // Check if any mutations are relevant to message content
-          const hasRelevantChanges = mutations.some(
-            (mutation) =>
-              mutation.type === 'childList' ||
-              (mutation.type === 'attributes' && mutation.attributeName === 'data-qa') ||
-              (mutation.type === 'attributes' &&
-                mutation.attributeName === 'data-needs-sender-update'),
-          );
+    // Clean up existing observers
+    this.disconnectAllObservers();
 
-          if (hasRelevantChanges) {
-            void this.extractMessages();
-            this.onSync();
-            this.lastMessageTimestamp = Date.now();
+    // Set up container observer
+    this.setupContainerObserver(container);
+  }
+
+  private disconnectAllObservers(): void {
+    for (const observer of this.observers.values()) {
+      observer.disconnect();
+    }
+    this.observers.clear();
+  }
+
+  private setupContainerObserver(container: Element): void {
+    const containerObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          // Look for the virtual list container
+          const virtualList = container.querySelector('[data-qa="virtual_list"]');
+          if (virtualList) {
+            this.setupVirtualListObserver(virtualList);
           }
         }
-      });
+      }
+    });
 
-      this.observer.observe(container, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: [
-          'data-qa',
-          'data-needs-sender-update',
-          this.EXTRACTED_ATTRIBUTE,
-          this.RANGE_ATTRIBUTE,
-        ],
-      });
+    containerObserver.observe(container, {
+      childList: true,
+      subtree: false,
+    });
+
+    this.observers.set(this.OBSERVER_LEVELS.CONTAINER, containerObserver);
+
+    // Initial virtual list setup
+    const virtualList = container.querySelector('[data-qa="virtual_list"]');
+    if (virtualList) {
+      this.setupVirtualListObserver(virtualList);
+    }
+  }
+
+  private setupVirtualListObserver(virtualList: Element): void {
+    const listObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          // Process new message items
+          for (const node of mutation.addedNodes) {
+            if (node instanceof Element && node.matches('[data-qa="virtual-list-item"]')) {
+              this.setupMessageItemObserver(node);
+            }
+          }
+        }
+      }
+    });
+
+    listObserver.observe(virtualList, {
+      childList: true,
+      subtree: false,
+    });
+
+    this.observers.set(this.OBSERVER_LEVELS.MESSAGE_LIST, listObserver);
+
+    // Initial message items setup
+    const existingMessages = virtualList.querySelectorAll('[data-qa="virtual-list-item"]');
+    for (const message of existingMessages) {
+      this.setupMessageItemObserver(message);
+    }
+  }
+
+  private setupMessageItemObserver(messageItem: Element): void {
+    const itemObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (
+          mutation.type === 'attributes' &&
+          (mutation.attributeName === 'data-qa' ||
+            mutation.attributeName === 'data-needs-sender-update' ||
+            mutation.attributeName === this.EXTRACTED_ATTRIBUTE ||
+            mutation.attributeName === this.RANGE_ATTRIBUTE)
+        ) {
+          this.handleMessageAttributeChange(messageItem, mutation.attributeName);
+        } else if (mutation.type === 'childList') {
+          // Setup content observers for new message content
+          const messageContent = messageItem.querySelector('[data-qa="message-text"]');
+          if (messageContent) {
+            this.setupMessageContentObserver(messageContent, messageItem);
+          }
+        }
+      }
+    });
+
+    itemObserver.observe(messageItem, {
+      attributes: true,
+      attributeFilter: [
+        'data-qa',
+        'data-needs-sender-update',
+        this.EXTRACTED_ATTRIBUTE,
+        this.RANGE_ATTRIBUTE,
+      ],
+      childList: true,
+      subtree: false,
+    });
+
+    // Initial content setup
+    const messageContent = messageItem.querySelector('[data-qa="message-text"]');
+    if (messageContent) {
+      this.setupMessageContentObserver(messageContent, messageItem);
+    }
+  }
+
+  private setupMessageContentObserver(messageContent: Element, messageItem: Element): void {
+    const contentObserver = new MutationObserver(() => {
+      if (!this.isExtracting) {
+        void this.processMessageUpdate(messageItem);
+      }
+    });
+
+    contentObserver.observe(messageContent, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    this.observers.set(
+      `${this.OBSERVER_LEVELS.MESSAGE_CONTENT}_${messageItem.id}`,
+      contentObserver,
+    );
+  }
+
+  private async processMessageUpdate(messageItem: Element): Promise<void> {
+    if (!this.currentChannelInfo) return;
+
+    const messageId = messageItem.getAttribute('id');
+    if (!messageId || !this.messageExtractor.isValidMessageId(messageId)) return;
+
+    const messageText = messageItem.querySelector('[data-qa="message-text"]');
+    const text = messageText?.textContent ?? '';
+    if (text.trim() === '') return;
+
+    const { sender, senderId, avatarUrl, customStatus, isInferred } =
+      this.messageExtractor.extractMessageSender(messageItem);
+
+    const timestampElement = messageItem.querySelector('.c-timestamp');
+    if (!timestampElement) return;
+
+    const { timestamp, permalink } =
+      this.messageExtractor.extractMessageTimestamp(timestampElement);
+    if (!timestamp) return;
+
+    const message: SlackMessage = {
+      messageId,
+      sender,
+      senderId,
+      timestamp,
+      text,
+      permalink,
+      customStatus,
+      avatarUrl,
+      isInferredSender: isInferred,
+    };
+
+    const attachments = this.messageExtractor.extractAttachments(messageItem);
+    if (attachments) {
+      message.attachments = attachments;
+    }
+
+    if (this.messageExtractor.isValidMessage(message)) {
+      await this.updateMessageHierarchy(message);
+      this.messageExtractor.markMessageAsExtracted(messageItem);
+      this.markMessageInRange(messageItem, timestamp);
+      this.onSync();
+      this.lastMessageTimestamp = Date.now();
+    }
+  }
+
+  private handleMessageAttributeChange(messageItem: Element, attributeName: string): void {
+    if (
+      attributeName === 'data-needs-sender-update' ||
+      !this.messageExtractor.isMessageExtracted(messageItem)
+    ) {
+      void this.processMessageUpdate(messageItem);
     }
   }
 
