@@ -8,6 +8,11 @@ interface TimeRange {
   end: number;
 }
 
+interface OrgChannelGroup {
+  organization: string;
+  channel: string;
+}
+
 interface ExtractedTimeRanges {
   [organization: string]: {
     [channel: string]: TimeRange[];
@@ -532,6 +537,93 @@ export class StorageService {
       };
     }
 
+    await this.saveState(state);
+    const endTime = performance.now();
+    this.metrics.writeTimes.push(endTime - startTime);
+    await metricsUpdate;
+  }
+
+  public async pruneMessagesByOrgGroup(groups: OrgChannelGroup[]): Promise<void> {
+    const startTime = performance.now();
+    const metricsUpdate = this.updateMetrics();
+
+    if (!Array.isArray(groups) || groups.length === 0) {
+      throw new Error('Groups must be a non-empty array');
+    }
+
+    const state = await this.loadState();
+    let hasChanges = false;
+
+    // Create a lookup map for faster checks
+    const groupMap = new Map<string, Set<string>>();
+    for (const { organization, channel } of groups) {
+      if (!groupMap.has(organization)) {
+        groupMap.set(organization, new Set());
+      }
+      groupMap.get(organization)?.add(channel);
+    }
+
+    // Filter out the specified org-channel groups
+    const remainingMessages: MessagesByOrganization = {};
+    for (const [org, orgData] of Object.entries(state.extractedMessages)) {
+      const channelsToRemove = groupMap.get(org);
+
+      if (!channelsToRemove) {
+        // Keep all channels for this org
+        remainingMessages[org] = orgData;
+        continue;
+      }
+
+      // Filter channels for this org
+      const remainingChannels: typeof orgData = {};
+      for (const [channel, messages] of Object.entries(orgData)) {
+        if (!channelsToRemove.has(channel)) {
+          remainingChannels[channel] = messages;
+        } else {
+          hasChanges = true;
+        }
+      }
+
+      // Only keep the org if it has remaining channels
+      if (Object.keys(remainingChannels).length > 0) {
+        remainingMessages[org] = remainingChannels;
+      }
+    }
+
+    if (!hasChanges) {
+      throw new Error('No matching organization-channel groups found to prune');
+    }
+
+    // Update state with remaining messages
+    state.extractedMessages = remainingMessages;
+
+    // Also prune the time ranges
+    const remainingTimeRanges: ExtractedTimeRanges = {};
+    for (const [org, orgData] of Object.entries(state.extractedTimeRanges)) {
+      const channelsToRemove = groupMap.get(org);
+
+      if (!channelsToRemove) {
+        // Keep all channels for this org
+        remainingTimeRanges[org] = orgData;
+        continue;
+      }
+
+      // Filter channels for this org
+      const remainingChannels: typeof orgData = {};
+      for (const [channel, ranges] of Object.entries(orgData)) {
+        if (!channelsToRemove.has(channel)) {
+          remainingChannels[channel] = ranges;
+        }
+      }
+
+      // Only keep the org if it has remaining channels
+      if (Object.keys(remainingChannels).length > 0) {
+        remainingTimeRanges[org] = remainingChannels;
+      }
+    }
+    state.extractedTimeRanges = remainingTimeRanges;
+
+    // Save the updated state
     await this.saveState(state);
     const endTime = performance.now();
     this.metrics.writeTimes.push(endTime - startTime);

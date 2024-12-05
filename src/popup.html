@@ -286,10 +286,49 @@
         transform: translateX(2px);
       }
 
+      .time-range-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+
+      .delete-button {
+        padding: 6px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+      }
+
+      .time-range-item:hover .delete-button {
+        opacity: 1;
+      }
+
+      .delete-button:hover {
+        background: var(--surface);
+        color: var(--error);
+        transform: scale(1.1);
+      }
+
+      .delete-button:active {
+        transform: scale(0.95);
+      }
+
       .time-range-channel {
         font-weight: 600;
-        margin-bottom: 4px;
         color: var(--text);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .time-range-dates {
@@ -339,6 +378,64 @@
         opacity: 0.7;
         cursor: progress;
       }
+
+      .dialog-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+
+      .dialog-overlay.visible {
+        display: flex;
+      }
+
+      .dialog {
+        background: var(--surface);
+        border-radius: 12px;
+        padding: 20px;
+        max-width: 300px;
+        width: 100%;
+        box-shadow: 0 4px 12px var(--shadow);
+      }
+
+      .dialog-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--text);
+      }
+
+      .dialog-message {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+        line-height: 1.5;
+      }
+
+      .dialog-buttons {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .dialog-cancel {
+        background: var(--surface-hover);
+      }
+
+      .dialog-confirm {
+        background: var(--error);
+      }
+
+      .dialog-confirm:hover {
+        background: color-mix(in srgb, var(--error) 80%, black);
+      }
     </style>
   </head>
   <body>
@@ -382,6 +479,18 @@
         </div>
       </div>
     </div>
+
+    <div class="dialog-overlay" id="confirmDialog">
+      <div class="dialog">
+        <div class="dialog-title">Delete Messages</div>
+        <div class="dialog-message" id="confirmMessage"></div>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel" id="cancelDelete">Cancel</button>
+          <button class="dialog-confirm" id="confirmDelete">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <script src="popup.js"></script>
   </body>
 </html>

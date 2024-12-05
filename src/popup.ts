@@ -1,5 +1,5 @@
-import { StorageService } from './services/extraction/storage';
 import { format } from 'date-fns';
+import { StorageService } from './services/extraction/storage';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const storageService = new StorageService();
@@ -12,10 +12,53 @@ document.addEventListener('DOMContentLoaded', async () => {
   const timeRanges = document.getElementById('timeRanges') as HTMLDivElement;
   const scrollingToggle = document.getElementById('scrollingToggle') as HTMLInputElement;
   const container = document.querySelector('.container') as HTMLDivElement;
+  const confirmDialog = document.getElementById('confirmDialog') as HTMLDivElement;
+  const confirmMessage = document.getElementById('confirmMessage') as HTMLDivElement;
+  const confirmDeleteButton = document.getElementById('confirmDelete') as HTMLButtonElement;
+  const cancelDeleteButton = document.getElementById('cancelDelete') as HTMLButtonElement;
 
   let isExtracting = false;
   let totalMessages = 0;
   let isLoading = true;
+  let pendingDelete: { organization: string; channel: string } | null = null;
+
+  const showConfirmDialog = (organization: string, channel: string): void => {
+    const channelDisplay = channel.startsWith('DM: ') ? channel.substring(4) : `#${channel}`;
+    confirmMessage.textContent = `Delete all messages from ${channelDisplay} in ${organization}?`;
+    confirmDialog.classList.add('visible');
+    pendingDelete = { organization, channel };
+  };
+
+  const hideConfirmDialog = (): void => {
+    confirmDialog.classList.remove('visible');
+    pendingDelete = null;
+  };
+
+  // Handle dialog buttons
+  confirmDeleteButton.addEventListener('click', async () => {
+    if (pendingDelete) {
+      await handleDelete(pendingDelete.organization, pendingDelete.channel);
+      hideConfirmDialog();
+    }
+  });
+
+  cancelDeleteButton.addEventListener('click', () => {
+    hideConfirmDialog();
+  });
+
+  // Close dialog on overlay click
+  confirmDialog.addEventListener('click', (e) => {
+    if (e.target === confirmDialog) {
+      hideConfirmDialog();
+    }
+  });
+
+  // Close dialog on escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmDialog.classList.contains('visible')) {
+      hideConfirmDialog();
+    }
+  });
 
   const setError = (message: string): void => {
     const errorElement = document.getElementById('error');
@@ -77,6 +120,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${format(startDate, 'MMM d, yyyy HH:mm')} - ${format(endDate, 'MMM d, yyyy HH:mm')}`;
   };
 
+  const handleDelete = async (organization: string, channel: string): Promise<void> => {
+    try {
+      setLoading(true);
+      await storageService.pruneMessagesByOrgGroup([{ organization, channel }]);
+
+      // Refresh the UI
+      const state = await storageService.loadState();
+      totalMessages = Object.values(state.extractedMessages)
+        .flatMap((org) => Object.values(org))
+        .flatMap((channel) => Object.values(channel))
+        .reduce((acc, messages) => acc + messages.length, 0);
+
+      messageCount.textContent = totalMessages.toLocaleString();
+      updateTimeRanges(state);
+      updateUI();
+    } catch (error) {
+      console.error('Failed to delete messages:', error);
+      setError('Failed to delete messages');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateTimeRanges = (state: Awaited<ReturnType<typeof storageService.loadState>>): void => {
     if (!timeRanges) return;
 
@@ -97,9 +163,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           .sort((a, b) => b.end - a.end) // Most recent first
           .map((range) => formatTimeRange(range.start, range.end));
 
+        const deleteButtonId = `delete-${org}-${channel}`.replace(/[^a-zA-Z0-9-]/g, '-');
+
         rangeElements.push(`
           <div class="time-range-item">
-            <div class="time-range-channel">${org} / ${channelDisplay}</div>
+            <div class="time-range-header">
+              <div class="time-range-channel">${org} / ${channelDisplay}</div>
+              <button class="delete-button" id="${deleteButtonId}" title="Delete all messages from this channel">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4m2 0v9.333a1.333 1.333 0 01-1.334 1.334H4.667a1.333 1.333 0 01-1.334-1.334V4h9.334z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
             <div class="time-range-dates">${rangeStrings.join('<br>')}</div>
           </div>
         `);
@@ -110,6 +185,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       timeRanges.innerHTML = 'No ranges extracted';
     } else {
       timeRanges.innerHTML = rangeElements.join('');
+
+      // Add click handlers for delete buttons
+      for (const [org, orgRanges] of Object.entries(ranges)) {
+        for (const channel of Object.keys(orgRanges)) {
+          const deleteButtonId = `delete-${org}-${channel}`.replace(/[^a-zA-Z0-9-]/g, '-');
+          const deleteButton = document.getElementById(deleteButtonId);
+          if (deleteButton) {
+            deleteButton.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              showConfirmDialog(org, channel);
+            });
+          }
+        }
+      }
     }
   };
 
