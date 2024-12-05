@@ -34,6 +34,7 @@ export class MonitorService {
   private isAutoScrolling = false;
   private readonly MAX_IDLE_TIME_MS = 10000;
   private lastScrollTime: number = Date.now();
+  private consecutiveTimeouts = 0;
 
   private readonly OBSERVER_LEVELS = {
     CONTAINER: 'container',
@@ -610,7 +611,17 @@ export class MonitorService {
           this.currentChannelInfo.organization,
           this.currentChannelInfo.channel,
         );
-        scrollAmount = direction === 'up' ? -amount : amount;
+
+        // For downward scrolling, we want to move towards the bottom
+        scrollAmount = direction === 'up' ? -Math.abs(amount) : Math.abs(amount);
+
+        this.log('Attempting scroll', {
+          direction,
+          scrollAmount,
+          currentScrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+        });
       }
 
       // Try each scroll method sequentially instead of in parallel
@@ -618,9 +629,12 @@ export class MonitorService {
         // Method 1: Smooth scroll with animation
         async (): Promise<boolean> => {
           const beforeScroll = el.scrollTop;
-          const targetScroll = Math.max(0, el.scrollTop + scrollAmount);
+          const targetScroll = Math.max(
+            0,
+            Math.min(el.scrollHeight - el.clientHeight, el.scrollTop + scrollAmount),
+          );
           const startTime = performance.now();
-          const duration = 200; // Reduced from 400 for faster animation
+          const duration = 200;
 
           // Smooth scroll animation
           const animate = async (): Promise<boolean> => {
@@ -642,6 +656,11 @@ export class MonitorService {
             const didScroll = el.scrollTop !== beforeScroll;
             if (didScroll) {
               this.lastScrollTime = Date.now();
+              this.log('Smooth scroll successful', {
+                from: beforeScroll,
+                to: el.scrollTop,
+                amount: scrollAmount,
+              });
             }
             return didScroll;
           };
@@ -651,23 +670,36 @@ export class MonitorService {
 
         // Method 2: ScrollIntoView with smooth behavior
         async (): Promise<boolean> => {
-          const unextractedMessage = el.querySelector(
-            `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`,
+          const direction = await this.storageService.getScrollDirection(
+            this.currentChannelInfo?.organization ?? '',
+            this.currentChannelInfo?.channel ?? '',
           );
 
-          if (unextractedMessage instanceof HTMLElement) {
+          const selector =
+            direction === 'up'
+              ? `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"])`
+              : `[data-qa="virtual-list-item"]:not([${this.EXTRACTED_ATTRIBUTE}="true"]):last-child`;
+
+          const targetMessage = el.querySelector(selector);
+
+          if (targetMessage instanceof HTMLElement) {
             const beforeScroll = el.scrollTop;
-            unextractedMessage.scrollIntoView({
+            targetMessage.scrollIntoView({
               behavior: 'smooth',
-              block: scrollAmount < 0 ? 'start' : 'end',
+              block: direction === 'up' ? 'start' : 'end',
             });
 
             // Wait for smooth scroll to complete
-            await new Promise((resolve) => setTimeout(resolve, 200)); // Reduced from 400
+            await new Promise((resolve) => setTimeout(resolve, 200));
 
             const didScroll = el.scrollTop !== beforeScroll;
             if (didScroll) {
               this.lastScrollTime = Date.now();
+              this.log('ScrollIntoView successful', {
+                from: beforeScroll,
+                to: el.scrollTop,
+                direction,
+              });
             }
             return didScroll;
           }
@@ -679,12 +711,15 @@ export class MonitorService {
           const beforeScroll = el.scrollTop;
           const targetScroll = Math.max(
             0,
-            el.scrollTop + scrollAmount * this.FORCE_SCROLL_MULTIPLIER,
+            Math.min(
+              el.scrollHeight - el.clientHeight,
+              el.scrollTop + scrollAmount * this.FORCE_SCROLL_MULTIPLIER,
+            ),
           );
 
           // Even for force scroll, use smooth animation
           const startTime = performance.now();
-          const duration = 150; // Reduced from 300 for faster force scroll
+          const duration = 150;
 
           const animate = async (): Promise<boolean> => {
             const currentTime = performance.now();
@@ -704,6 +739,11 @@ export class MonitorService {
             const didScroll = el.scrollTop !== beforeScroll;
             if (didScroll) {
               this.lastScrollTime = Date.now();
+              this.log('Force scroll successful', {
+                from: beforeScroll,
+                to: el.scrollTop,
+                amount: scrollAmount * this.FORCE_SCROLL_MULTIPLIER,
+              });
             }
             return didScroll;
           };
@@ -724,7 +764,16 @@ export class MonitorService {
 
       // Check if we got new messages even if scrolling appeared to fail
       const afterMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
-      return afterMessageCount > beforeMessageCount;
+      const gotNewMessages = afterMessageCount > beforeMessageCount;
+
+      if (gotNewMessages) {
+        this.log('Got new messages despite scroll failure', {
+          beforeCount: beforeMessageCount,
+          afterCount: afterMessageCount,
+        });
+      }
+
+      return gotNewMessages;
     } catch (error) {
       this.log('Error during scroll attempt', {
         element: el.className,
@@ -742,13 +791,45 @@ export class MonitorService {
       this.currentChannelInfo.channel,
     );
 
-    const buffer = 100; // pixels from the edge to consider as endpoint
+    const buffer = this.SCROLL_THRESHOLD;
+
+    // Check for signs that we've hit the top of message history
+    const hasMinimalScrollSpace = element.scrollHeight - element.clientHeight < buffer * 2;
+    const isAtTop = element.scrollTop <= buffer;
+    const isAtBottom =
+      Math.abs(element.scrollTop + element.clientHeight - element.scrollHeight) <= buffer;
+    const hasRepeatedTimeouts = this.consecutiveTimeouts >= 3;
+    const noNewMessages =
+      this.lastMessageCount === document.querySelectorAll('[data-qa="virtual-list-item"]').length;
+
+    // Consider we're at the top if:
+    // 1. We're scrolling up AND we're near the top, OR
+    // 2. We have minimal scroll space left, OR
+    // 3. We've had repeated timeouts with no new messages
     const isAtEndpoint =
       direction === 'up'
-        ? element.scrollTop <= buffer // Near top
-        : element.scrollTop + element.clientHeight >= element.scrollHeight - buffer; // Near bottom
+        ? isAtTop || hasMinimalScrollSpace || (hasRepeatedTimeouts && noNewMessages)
+        : isAtBottom;
 
     if (isAtEndpoint) {
+      this.log('Reached scroll endpoint', {
+        direction,
+        scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        hasMinimalScrollSpace,
+        isAtTop,
+        isAtBottom,
+        hasRepeatedTimeouts,
+        noNewMessages,
+        buffer,
+        consecutiveTimeouts: this.consecutiveTimeouts,
+        messageCount: this.lastMessageCount,
+      });
+
+      // Reset counters on direction change
+      this.consecutiveTimeouts = 0;
+
       // Toggle direction and continue scrolling
       await this.storageService.toggleScrollDirection(
         this.currentChannelInfo.organization,
@@ -761,7 +842,6 @@ export class MonitorService {
   }
 
   private async waitForNewMessages(currentCount: number): Promise<boolean> {
-    // Check if auto-scroll is still enabled
     const state = await this.storageService.loadState();
     if (!state.isScrollingEnabled) {
       this.log('Auto-scroll was disabled while waiting for messages');
@@ -774,7 +854,6 @@ export class MonitorService {
     const MAX_NO_CHANGE = 3;
 
     while (Date.now() - startTime < this.MAX_WAIT_FOR_MESSAGES_MS) {
-      // Check if auto-scroll was disabled while waiting
       const currentState = await this.storageService.loadState();
       if (!currentState.isScrollingEnabled) {
         this.log('Auto-scroll was disabled while waiting for messages');
@@ -784,6 +863,7 @@ export class MonitorService {
       const newCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
       if (newCount > currentCount) {
+        this.consecutiveTimeouts = 0;
         this.log('Found new messages', {
           beforeCount: currentCount,
           afterCount: newCount,
@@ -795,7 +875,6 @@ export class MonitorService {
       if (newCount === lastCount) {
         noChangeCount++;
         if (noChangeCount >= MAX_NO_CHANGE) {
-          // If count hasn't changed for several checks, try forcing a scroll
           const scrollableElement = await this.findAndScrollElement();
           if (scrollableElement instanceof HTMLElement) {
             await this.attemptScrollOnElement(
@@ -809,13 +888,19 @@ export class MonitorService {
       }
 
       lastCount = newCount;
-      await new Promise((resolve) => setTimeout(resolve, 50)); // Faster polling
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
+
+    // Increment timeout counter when we time out waiting for messages
+    this.consecutiveTimeouts++;
+    this.lastMessageCount = currentCount;
 
     this.log('Timed out waiting for new messages', {
       messageCount: currentCount,
-      waitTime: this.MAX_WAIT_FOR_MESSAGES_MS,
+      waitTime: Date.now() - startTime,
+      consecutiveTimeouts: this.consecutiveTimeouts,
     });
+
     return false;
   }
 
