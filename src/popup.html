@@ -9,63 +9,100 @@
         --primary-color: #36C5AB;
         --primary-hover: #2ea892;
         --background: #1a1d21;
+        --surface: #222529;
+        --surface-hover: #2a2d31;
         --text: #ffffff;
         --text-secondary: #9b9b9b;
         --border: #363636;
         --skeleton: #2c2c2c;
         --skeleton-shine: #363636;
+        --shadow: rgba(0, 0, 0, 0.2);
+        --status-bg: rgba(54, 197, 171, 0.15);
+        --error: #e01e5a;
+        --success: #2eb67d;
       }
 
       body {
-        width: 320px;
-        padding: 16px;
+        width: 360px;
         margin: 0;
         font-family: system-ui, -apple-system, sans-serif;
         background: var(--background);
         color: var(--text);
+        line-height: 1.5;
+        overscroll-behavior: none;
       }
 
       .container {
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 20px;
+        padding: 20px;
+        min-height: 480px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+        background: var(--surface);
+        border-radius: 12px;
+        box-shadow: 0 2px 8px var(--shadow);
       }
 
       .status {
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 12px;
-        background: color-mix(in srgb, var(--primary-color) 8%, transparent);
-        border-radius: 8px;
+        flex: 1;
       }
 
       .status-indicator {
-        width: 10px;
-        height: 10px;
+        width: 12px;
+        height: 12px;
         border-radius: 50%;
         background-color: var(--text-secondary);
-        transition: background-color 0.3s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 0 0 0 var(--primary-color);
         flex-shrink: 0;
       }
 
       .status-indicator.active {
         background-color: var(--primary-color);
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(54, 197, 171, 0.4);
+        }
+        70% {
+          box-shadow: 0 0 0 10px rgba(54, 197, 171, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(54, 197, 171, 0);
+        }
       }
 
       .controls {
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 12px;
       }
 
       .toggle-container {
+        grid-column: 1 / -1;
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 8px;
-        border-radius: 6px;
-        background: color-mix(in srgb, var(--text) 4%, transparent);
+        padding: 12px;
+        border-radius: 8px;
+        background: var(--surface);
+        transition: background-color 0.2s ease;
+      }
+
+      .toggle-container:hover {
+        background: var(--surface-hover);
       }
 
       .toggle-switch {
@@ -90,7 +127,7 @@
         right: 0;
         bottom: 0;
         background-color: var(--text-secondary);
-        transition: .3s ease-in-out;
+        transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 24px;
       }
 
@@ -102,8 +139,9 @@
         left: 3px;
         bottom: 3px;
         background-color: var(--background);
-        transition: .3s ease-in-out;
+        transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 50%;
+        box-shadow: 0 2px 4px var(--shadow);
       }
 
       input:checked + .toggle-slider {
@@ -117,34 +155,55 @@
       button {
         padding: 12px 16px;
         border: none;
-        border-radius: 6px;
-        background-color: var(--primary-color);
-        color: white;
+        border-radius: 8px;
+        background-color: var(--surface);
+        color: var(--text);
         cursor: pointer;
         font-size: 14px;
         font-weight: 500;
-        transition: background-color 0.2s ease;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        box-shadow: 0 2px 4px var(--shadow);
       }
 
       button:hover:not(:disabled) {
-        background-color: var(--primary-hover);
+        background-color: var(--surface-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px var(--shadow);
+      }
+
+      button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px var(--shadow);
       }
 
       button:disabled {
-        background-color: var(--text-secondary);
         opacity: 0.5;
         cursor: not-allowed;
+      }
+
+      #toggleButton {
+        background-color: var(--primary-color);
+        color: white;
+      }
+
+      #toggleButton:hover:not(:disabled) {
+        background-color: var(--primary-hover);
       }
 
       .stats {
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        font-size: 13px;
+        gap: 16px;
+        font-size: 14px;
         color: var(--text-secondary);
-        padding: 16px;
-        background: color-mix(in srgb, var(--text) 4%, transparent);
-        border-radius: 6px;
+        padding: 20px;
+        background: var(--surface);
+        border-radius: 12px;
+        box-shadow: 0 2px 8px var(--shadow);
       }
 
       .stats-row {
@@ -152,6 +211,9 @@
         justify-content: space-between;
         align-items: center;
         gap: 12px;
+        padding: 8px;
+        background: var(--background);
+        border-radius: 8px;
       }
 
       .stats-row span:first-child {
@@ -161,20 +223,26 @@
 
       .stats-row span:last-child {
         color: var(--text);
-        font-weight: 500;
+        font-weight: 600;
         text-align: right;
+        font-variant-numeric: tabular-nums;
       }
 
       .channel-info {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 8px;
+        padding: 12px;
+        background: var(--background);
+        border-radius: 8px;
       }
 
       .channel-label {
         font-size: 12px;
         color: var(--text-secondary);
         font-weight: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
 
       .channel-value {
@@ -182,6 +250,51 @@
         font-weight: 500;
         word-break: break-word;
         line-height: 1.4;
+      }
+
+      .time-ranges {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .time-ranges-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .time-ranges-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .time-range-item {
+        display: flex;
+        flex-direction: column;
+        padding: 12px;
+        background: var(--status-bg);
+        border-radius: 8px;
+        transition: transform 0.2s ease;
+      }
+
+      .time-range-item:hover {
+        transform: translateX(2px);
+      }
+
+      .time-range-channel {
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: var(--text);
+      }
+
+      .time-range-dates {
+        font-size: 12px;
+        color: var(--text-secondary);
       }
 
       /* Skeleton Loading */
@@ -199,7 +312,7 @@
           var(--skeleton) 75%
         );
         background-size: 200% 100%;
-        animation: shine 1.5s infinite linear;
+        animation: shine 1.5s infinite cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 4px;
         color: transparent !important;
         cursor: progress;
@@ -218,64 +331,23 @@
         height: 20px;
       }
 
+      .loading .time-ranges-list.skeleton {
+        min-height: 120px;
+      }
+
       .loading button {
         opacity: 0.7;
         cursor: progress;
-      }
-
-      .time-ranges {
-        margin-top: 8px;
-        padding-top: 12px;
-        border-top: 1px solid var(--border);
-      }
-
-      .time-ranges-label {
-        font-size: 12px;
-        color: var(--text-secondary);
-        font-weight: normal;
-        display: block;
-        margin-bottom: 8px;
-      }
-
-      .time-ranges-list {
-        font-size: 13px;
-        color: var(--text);
-        line-height: 1.4;
-      }
-
-      .time-range-item {
-        display: flex;
-        flex-direction: column;
-        padding: 8px;
-        background: color-mix(in srgb, var(--primary-color) 5%, transparent);
-        border-radius: 4px;
-        margin-bottom: 8px;
-      }
-
-      .time-range-item:last-child {
-        margin-bottom: 0;
-      }
-
-      .time-range-channel {
-        font-weight: 500;
-        margin-bottom: 4px;
-      }
-
-      .time-range-dates {
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-
-      .loading .time-ranges-list.skeleton {
-        height: 60px;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <div class="status">
-        <div id="statusIndicator" class="status-indicator"></div>
-        <span id="statusText">Initializing...</span>
+      <div class="header">
+        <div class="status">
+          <div id="statusIndicator" class="status-indicator"></div>
+          <span id="statusText">Initializing...</span>
+        </div>
       </div>
 
       <div class="controls">
