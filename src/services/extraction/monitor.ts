@@ -927,8 +927,17 @@ export class MonitorService {
 
       if (messageElements.length === 0) return;
 
-      // Process messages in dynamic chunks from bottom to top
-      const messages = Array.from(messageElements).reverse(); // Reverse to process bottom-to-top
+      // Get current scroll direction
+      const direction = await this.storageService.getScrollDirection(
+        this.currentChannelInfo.organization,
+        this.currentChannelInfo.channel,
+      );
+
+      // Process messages in dynamic chunks based on scroll direction
+      const messages =
+        direction === 'up'
+          ? Array.from(messageElements).reverse() // Bottom to top for upward scrolling
+          : Array.from(messageElements); // Top to bottom for downward scrolling
       const viewportHeight = window.innerHeight;
       const avgMessageHeight = 50; // Approximate average height of a message
       const messagesInViewport = Math.ceil(viewportHeight / avgMessageHeight);
@@ -973,18 +982,12 @@ export class MonitorService {
           const { sender, senderId, avatarUrl, customStatus, isInferred } =
             this.messageExtractor.extractMessageSender(listItem);
 
-          // Get timestamp and permalink
           const timestampElement = listItem.querySelector('.c-timestamp');
-          if (timestampElement === null) return;
+          if (!timestampElement) return;
 
           const { timestamp, permalink } =
             this.messageExtractor.extractMessageTimestamp(timestampElement);
-
-          // Skip messages without timestamps as they're likely UI elements
-          if (timestamp === null) return;
-
-          // Mark if message is in extracted range
-          this.markMessageInRange(listItem, timestamp);
+          if (!timestamp) return;
 
           const message: SlackMessage = {
             messageId,
@@ -998,32 +1001,26 @@ export class MonitorService {
             isInferredSender: isInferred,
           };
 
-          // Extract attachments if present
           const attachments = this.messageExtractor.extractAttachments(listItem);
           if (attachments) {
             message.attachments = attachments;
           }
 
-          // Only add valid messages to the hierarchy and mark them as extracted
           if (this.messageExtractor.isValidMessage(message)) {
             await this.updateMessageHierarchy(message);
             this.messageExtractor.markMessageAsExtracted(listItem);
-            processedIds.add(messageId);
+            this.markMessageInRange(listItem, timestamp);
+            this.onSync();
+            this.lastMessageTimestamp = Date.now();
           }
+
+          processedIds.add(messageId);
         });
 
-        // Process chunk in parallel but wait for completion
         await Promise.all(extractionPromises);
-
-        // Allow UI to update between chunks and check if we should continue
-        await this.nextTick();
-
-        // Check if extraction should continue
-        const state = await this.storageService.loadState();
-        if (!state.isScrollingEnabled && this.isAutoScrolling) {
-          break;
-        }
       }
+    } catch (error) {
+      console.error('Error extracting messages:', error);
     } finally {
       this.isExtracting = false;
     }

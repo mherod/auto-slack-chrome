@@ -657,6 +657,55 @@ private lastScrollPosition: number = 0;
 private scrollAttempts: number = 0;
 ```
 
+### Bi-directional Scrolling
+
+The extension supports bi-directional scrolling with direction tracking per channel:
+
+```typescript
+// Direction schema
+export const ScrollDirectionSchema = z.enum(['up', 'down']).default('up');
+export const ScrollDirectionsSchema = z
+  .record(z.string(), z.record(z.string(), ScrollDirectionSchema))
+  .default({});
+```
+
+#### Direction Management
+
+1. Direction Storage:
+   - Stored per organization and channel
+   - Persists across sessions
+   - Defaults to 'up' for new channels
+
+2. Direction Toggle:
+   ```typescript
+   // Toggle direction when reaching endpoint
+   const isAtEndpoint = direction === 'up'
+     ? element.scrollTop <= buffer // Near top
+     : element.scrollTop + element.clientHeight >= element.scrollHeight - buffer; // Near bottom
+   ```
+
+3. Message Processing:
+   ```typescript
+   // Process messages based on direction
+   const messages = direction === 'up'
+     ? Array.from(messageElements).reverse() // Bottom to top
+     : Array.from(messageElements); // Top to bottom
+   ```
+
+4. Auto-scroll Behavior:
+   - Starts scrolling up by default
+   - Toggles direction at endpoints (top/bottom)
+   - Maintains scroll direction per channel
+   - Resets scroll attempts on direction change
+   - Uses 100px buffer for endpoint detection
+
+5. Performance Optimizations:
+   - Dynamic chunk sizing based on viewport
+   - Direction-aware message processing
+   - Smooth scrolling with easing functions
+   - Debounced scroll operations
+   - Efficient DOM updates
+
 ### State Management
 
 ```typescript
