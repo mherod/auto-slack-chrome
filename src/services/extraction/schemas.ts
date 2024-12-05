@@ -52,6 +52,12 @@ export const ChannelInfoSchema = z
   })
   .strict();
 
+export const ScrollDirectionSchema = z.enum(['up', 'down']).default('up');
+
+export const ScrollDirectionsSchema = z
+  .record(z.string(), z.record(z.string(), ScrollDirectionSchema))
+  .default({});
+
 // Use precompiled array schema for better performance
 const SlackMessageArraySchema = z.array(SlackMessageSchema);
 
@@ -173,6 +179,8 @@ export type AttachmentImage = z.infer<typeof AttachmentImageSchema>;
 export type Attachment = z.infer<typeof AttachmentSchema>;
 export type SlackMessage = z.infer<typeof SlackMessageSchema>;
 export type ChannelInfo = z.infer<typeof ChannelInfoSchema>;
+export type ScrollDirection = z.infer<typeof ScrollDirectionSchema>;
+export type ScrollDirections = z.infer<typeof ScrollDirectionsSchema>;
 export type MessagesByDate = z.infer<typeof MessagesByDateSchema>;
 export type MessagesByChannel = z.infer<typeof MessagesByChannelSchema>;
 export type MessagesByOrganization = z.infer<typeof MessagesByOrganizationSchema>;

@@ -120,42 +120,37 @@ export class MonitorService {
   }
 
   public async startMonitoring(): Promise<void> {
-    // Load previous state
-    const state = await this.storageService.loadState();
-    this.extractedMessages = state.extractedMessages;
-
-    // Initial channel info extraction
-    this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
-
-    // Set up title observer and periodic check
-    this.setupTitleObserver();
-
-    // Set up message observer
-    this.setupMessageObserver();
-
-    // Mark the scroll container
-    const container = this.messageExtractor.getMessageContainer();
-    this.markScrollContainer(container);
-
-    // Set up scroll handler
-    this.setupScrollHandler();
-
-    // Set up reconnect check
-    this.setupReconnectCheck();
-
-    // Set up polling monitor
-    this.setupPollingMonitor();
-
-    // Initial extraction
-    await this.extractMessages();
-
-    // Start scrolling only if enabled
-    if (await this.storageService.isScrollingEnabled()) {
-      await this.autoScroll();
+    if (this.observer !== null) {
+      return;
     }
 
-    // Save initial state
-    await this.saveCurrentState();
+    try {
+      // Load previous state
+      const state = await this.storageService.loadState();
+      this.extractedMessages = state.extractedMessages;
+
+      // Initial channel info extraction
+      this.currentChannelInfo = this.messageExtractor.extractChannelInfo();
+      if (this.currentChannelInfo) {
+        this.onChannelChange(this.currentChannelInfo);
+      }
+
+      // Set up observers
+      this.setupMessageObserver();
+      this.setupTitleObserver();
+      this.setupPollingMonitor();
+      this.setupReconnectCheck();
+
+      // Start auto-scroll if enabled
+      if (state.isScrollingEnabled) {
+        void this.autoScroll();
+      }
+
+      this.log('Started monitoring');
+    } catch (error) {
+      console.error('Error starting monitoring:', error);
+      throw error;
+    }
   }
 
   public async stopMonitoring(): Promise<void> {
@@ -608,12 +603,22 @@ export class MonitorService {
     const beforeMessageCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
     try {
+      // Get current scroll direction for this channel
+      let scrollAmount = amount;
+      if (this.currentChannelInfo) {
+        const direction = await this.storageService.getScrollDirection(
+          this.currentChannelInfo.organization,
+          this.currentChannelInfo.channel,
+        );
+        scrollAmount = direction === 'up' ? -amount : amount;
+      }
+
       // Try each scroll method sequentially instead of in parallel
       const scrollMethods = [
         // Method 1: Smooth scroll with animation
         async (): Promise<boolean> => {
           const beforeScroll = el.scrollTop;
-          const targetScroll = Math.max(0, el.scrollTop - amount);
+          const targetScroll = Math.max(0, el.scrollTop + scrollAmount);
           const startTime = performance.now();
           const duration = 200; // Reduced from 400 for faster animation
 
@@ -627,7 +632,7 @@ export class MonitorService {
             const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3);
             const currentProgress = easeOut(progress);
 
-            el.scrollTop = beforeScroll - (beforeScroll - targetScroll) * currentProgress;
+            el.scrollTop = beforeScroll + (targetScroll - beforeScroll) * currentProgress;
 
             if (progress < 1) {
               await new Promise((resolve) => window.requestAnimationFrame(resolve));
@@ -654,7 +659,7 @@ export class MonitorService {
             const beforeScroll = el.scrollTop;
             unextractedMessage.scrollIntoView({
               behavior: 'smooth',
-              block: 'center',
+              block: scrollAmount < 0 ? 'start' : 'end',
             });
 
             // Wait for smooth scroll to complete
@@ -672,7 +677,10 @@ export class MonitorService {
         // Method 3: Force scroll with multiplier (fallback)
         async (): Promise<boolean> => {
           const beforeScroll = el.scrollTop;
-          const targetScroll = Math.max(0, el.scrollTop - amount * this.FORCE_SCROLL_MULTIPLIER);
+          const targetScroll = Math.max(
+            0,
+            el.scrollTop + scrollAmount * this.FORCE_SCROLL_MULTIPLIER,
+          );
 
           // Even for force scroll, use smooth animation
           const startTime = performance.now();
@@ -686,7 +694,7 @@ export class MonitorService {
             const easeOut = (t: number): number => 1 - Math.pow(1 - t, 2);
             const currentProgress = easeOut(progress);
 
-            el.scrollTop = beforeScroll - (beforeScroll - targetScroll) * currentProgress;
+            el.scrollTop = beforeScroll + (targetScroll - beforeScroll) * currentProgress;
 
             if (progress < 1) {
               await new Promise((resolve) => window.requestAnimationFrame(resolve));
@@ -724,6 +732,32 @@ export class MonitorService {
       });
       return false;
     }
+  }
+
+  private async checkScrollEndpoint(element: HTMLElement): Promise<boolean> {
+    if (!this.currentChannelInfo) return false;
+
+    const direction = await this.storageService.getScrollDirection(
+      this.currentChannelInfo.organization,
+      this.currentChannelInfo.channel,
+    );
+
+    const buffer = 100; // pixels from the edge to consider as endpoint
+    const isAtEndpoint =
+      direction === 'up'
+        ? element.scrollTop <= buffer // Near top
+        : element.scrollTop + element.clientHeight >= element.scrollHeight - buffer; // Near bottom
+
+    if (isAtEndpoint) {
+      // Toggle direction and continue scrolling
+      await this.storageService.toggleScrollDirection(
+        this.currentChannelInfo.organization,
+        this.currentChannelInfo.channel,
+      );
+      return true;
+    }
+
+    return false;
   }
 
   private async waitForNewMessages(currentCount: number): Promise<boolean> {
@@ -822,6 +856,17 @@ export class MonitorService {
         if (!scrollableElement) {
           await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
           continue;
+        }
+
+        // Check if we've reached the endpoint and need to change direction
+        if (scrollableElement instanceof HTMLElement) {
+          const reachedEndpoint = await this.checkScrollEndpoint(scrollableElement);
+          if (reachedEndpoint) {
+            // Reset scroll attempts when changing direction
+            this.scrollAttempts = 0;
+            consecutiveNoNewMessages = 0;
+            continue;
+          }
         }
 
         // Try to scroll
@@ -1035,6 +1080,7 @@ export class MonitorService {
       currentChannel: this.currentChannelInfo,
       extractedMessages: this.extractedMessages,
       extractedTimeRanges: {}, // Let storage service compute this from messages
+      scrollDirections: {}, // Let storage service maintain this state
     });
   }
 

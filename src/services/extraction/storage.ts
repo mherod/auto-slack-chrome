@@ -1,7 +1,12 @@
 import { flatMap, get, isEmpty, mean, memoize, merge, set, sortBy, sumBy } from 'lodash';
 import { z } from 'zod';
-import { MessagesByOrganizationSchema } from './schemas';
-import type { ChannelInfo, MessagesByOrganization, SlackMessage } from './types';
+import {
+  MessagesByOrganizationSchema,
+  ScrollDirectionsSchema,
+  type ChannelInfo,
+  type MessagesByOrganization,
+  type SlackMessage,
+} from './schemas';
 
 interface TimeRange {
   start: number;
@@ -44,6 +49,7 @@ const StorageStateSchema = z.object({
       ),
     )
     .default({}),
+  scrollDirections: ScrollDirectionsSchema,
 });
 
 type StorageState = z.infer<typeof StorageStateSchema>;
@@ -141,19 +147,26 @@ export class StorageService {
     }
 
     const data = await chrome.storage.local.get(this.STORAGE_KEY);
+    const defaultState: StorageState = {
+      isExtracting: false,
+      currentChannel: null,
+      extractedMessages: {},
+      isScrollingEnabled: true,
+      extractedTimeRanges: {},
+      scrollDirections: {},
+    };
 
     if (this.STORAGE_KEY in data && data[this.STORAGE_KEY] !== null) {
-      this.cachedState = await StorageStateSchema.parseAsync(data[this.STORAGE_KEY]);
+      const parsedState = await StorageStateSchema.parseAsync(data[this.STORAGE_KEY]);
+      this.cachedState = parsedState;
 
       // Ensure ranges are in sync with messages
       if (
-        Object.keys(this.cachedState.extractedMessages).length > 0 &&
-        (!this.cachedState.extractedTimeRanges ||
-          Object.keys(this.cachedState.extractedTimeRanges).length === 0)
+        Object.keys(parsedState.extractedMessages).length > 0 &&
+        (!parsedState.extractedTimeRanges ||
+          Object.keys(parsedState.extractedTimeRanges).length === 0)
       ) {
-        this.cachedState.extractedTimeRanges = this.updateTimeRanges(
-          this.cachedState.extractedMessages,
-        );
+        this.cachedState.extractedTimeRanges = this.updateTimeRanges(parsedState.extractedMessages);
         await this.saveState(this.cachedState);
       }
 
@@ -164,13 +177,7 @@ export class StorageService {
     }
 
     // Default state if nothing exists
-    this.cachedState = await StorageStateSchema.parseAsync({
-      isExtracting: false,
-      currentChannel: null,
-      extractedMessages: {},
-      isScrollingEnabled: true,
-      extractedTimeRanges: {},
-    });
+    this.cachedState = defaultState;
     const endTime = performance.now();
     this.metrics.readTimes.push(endTime - startTime);
     await metricsUpdate;
@@ -187,11 +194,11 @@ export class StorageService {
 
     try {
       if (typeof messages === 'object' && messages !== null) {
-        MessagesByOrganizationSchema.parse(messages);
+        const validatedMessages = await MessagesByOrganizationSchema.parseAsync(messages);
         const endTime = performance.now();
         this.metrics.readTimes.push(endTime - startTime);
         await metricsUpdate;
-        return messages;
+        return validatedMessages;
       }
       return defaultMessages;
     } catch (error) {
@@ -311,7 +318,7 @@ export class StorageService {
     if (!ranges) return false;
 
     return ranges.some(
-      (range) =>
+      (range: TimeRange) =>
         timestamp >= range.start - 60000 && // Include 1-minute buffer
         timestamp <= range.end + 60000,
     );
@@ -678,6 +685,32 @@ export class StorageService {
     this.metrics.readTimes.push(endTime - startTime);
     await metricsUpdate;
     return state.isScrollingEnabled;
+  }
+
+  public async getScrollDirection(organization: string, channel: string): Promise<'up' | 'down'> {
+    const state = await this.loadState();
+    return state.scrollDirections[organization]?.[channel] ?? 'up';
+  }
+
+  public async toggleScrollDirection(
+    organization: string,
+    channel: string,
+  ): Promise<'up' | 'down'> {
+    const state = await this.loadState();
+
+    // Initialize if needed
+    if (!state.scrollDirections[organization]) {
+      state.scrollDirections[organization] = {};
+    }
+
+    // Toggle direction
+    const currentDirection = state.scrollDirections[organization][channel] ?? 'up';
+    const newDirection = currentDirection === 'up' ? 'down' : 'up';
+
+    state.scrollDirections[organization][channel] = newDirection;
+    await this.saveState(state);
+
+    return newDirection;
   }
 
   public getCurrentState(): {
