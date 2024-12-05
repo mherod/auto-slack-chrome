@@ -128,6 +128,8 @@ export class MonitorService {
     try {
       // Load previous state
       const state = await this.storageService.loadState();
+      await this.nextTick();
+
       this.extractedMessages = state.extractedMessages;
 
       // Initial channel info extraction
@@ -136,11 +138,15 @@ export class MonitorService {
         this.onChannelChange(this.currentChannelInfo);
       }
 
+      await this.nextTick();
+
       // Set up observers
       this.setupMessageObserver();
       this.setupTitleObserver();
       this.setupPollingMonitor();
       this.setupReconnectCheck();
+
+      await this.nextTick();
 
       // Start auto-scroll if enabled
       if (state.isScrollingEnabled) {
@@ -169,6 +175,8 @@ export class MonitorService {
       // Remove scroll listener
       container.removeEventListener('scroll', this.handleScroll);
     }
+
+    await this.nextTick();
 
     // Stop observers and handlers
     if (this.observer !== null) {
@@ -200,6 +208,8 @@ export class MonitorService {
       window.clearInterval(this.autoScrollInterval);
       this.autoScrollInterval = null;
     }
+
+    await this.nextTick();
 
     // Save state
     await this.saveCurrentState();
@@ -252,6 +262,8 @@ export class MonitorService {
       if (!this.isExtracting) {
         // Reconnect observer first
         this.setupMessageObserver();
+
+        await this.nextTick();
 
         // Then extract messages
         await this.extractMessages();
@@ -405,6 +417,8 @@ export class MonitorService {
     const text = messageText?.textContent ?? '';
     if (text.trim() === '') return;
 
+    await this.nextTick();
+
     const { sender, senderId, avatarUrl, customStatus, isInferred } =
       this.messageExtractor.extractMessageSender(messageItem);
 
@@ -414,6 +428,8 @@ export class MonitorService {
     const { timestamp, permalink } =
       this.messageExtractor.extractMessageTimestamp(timestampElement);
     if (!timestamp) return;
+
+    await this.nextTick();
 
     const message: SlackMessage = {
       messageId,
@@ -431,6 +447,8 @@ export class MonitorService {
     if (attachments) {
       message.attachments = attachments;
     }
+
+    await this.nextTick();
 
     if (this.messageExtractor.isValidMessage(message)) {
       await this.updateMessageHierarchy(message);
@@ -494,11 +512,15 @@ export class MonitorService {
       // Update channel info
       this.currentChannelInfo = newChannelInfo;
 
+      await this.nextTick();
+
       // Disconnect and reconnect observer to ensure clean state
       if (this.observer !== null) {
         this.observer.disconnect();
       }
       this.setupMessageObserver();
+
+      await this.nextTick();
 
       // Extract messages in new channel
       await this.extractMessages();
@@ -552,6 +574,8 @@ export class MonitorService {
           }
         }
       }
+
+      await this.nextTick();
     }
 
     // Fallback to finding any scrollable element
@@ -570,6 +594,11 @@ export class MonitorService {
         if (hasVisibleScrollbar) {
           scrollableElements.push(element);
         }
+      }
+
+      // Add nextTick every 100 elements to prevent blocking
+      if (scrollableElements.length % 100 === 0) {
+        await this.nextTick();
       }
     }
 
@@ -623,6 +652,8 @@ export class MonitorService {
           clientHeight: el.clientHeight,
         });
       }
+
+      await this.nextTick();
 
       // Try each scroll method sequentially instead of in parallel
       const scrollMethods = [
@@ -760,6 +791,7 @@ export class MonitorService {
           await new Promise((resolve) => setTimeout(resolve, this.SCROLL_PAUSE_MS));
           return true;
         }
+        await this.nextTick();
       }
 
       // Check if we got new messages even if scrolling appeared to fail
@@ -802,6 +834,8 @@ export class MonitorService {
     const noNewMessages =
       this.lastMessageCount === document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
+    await this.nextTick();
+
     // Consider we're at the top if:
     // 1. We're scrolling up AND we're near the top, OR
     // 2. We have minimal scroll space left, OR
@@ -829,6 +863,8 @@ export class MonitorService {
 
       // Reset counters on direction change
       this.consecutiveTimeouts = 0;
+
+      await this.nextTick();
 
       // Toggle direction and continue scrolling
       await this.storageService.toggleScrollDirection(
@@ -859,6 +895,8 @@ export class MonitorService {
         this.log('Auto-scroll was disabled while waiting for messages');
         return false;
       }
+
+      await this.nextTick();
 
       const newCount = document.querySelectorAll('[data-qa="virtual-list-item"]').length;
 
