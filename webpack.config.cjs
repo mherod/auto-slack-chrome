@@ -47,7 +47,7 @@ module.exports = {
       ],
     }),
     process.env.WEBPACK_WATCH && new ExtReloader({
-      port: 9090,
+      port: 35729,
       reloadPage: true,
       entries: {
         background: 'background',

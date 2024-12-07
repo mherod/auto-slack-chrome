@@ -68,6 +68,7 @@
     "webpack-ext-reloader": "1.1.13"
   },
   "dependencies": {
+    "axios": "1.7.9",
     "date-fns": "^4.1.0",
     "lodash": "^4.17.21",
     "zod": "3.23.8"

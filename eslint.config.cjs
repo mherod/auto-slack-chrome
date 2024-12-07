@@ -165,13 +165,22 @@ module.exports = [
     },
   },
   {
-    files: ['src/background.ts'],
+    files: ['src/background.ts', 'src/services/extraction/monitor.ts'],
     languageOptions: {
       globals: {
         self: true,
         ServiceWorkerGlobalScope: true,
         chrome: true,
       },
+    },
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'window',
+          message: 'Use self instead of window in service worker contexts',
+        },
+      ],
     },
   },
   {
